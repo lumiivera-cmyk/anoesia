@@ -1,0 +1,117 @@
+<!doctype html>
+<!--
+  The login page (src/login.ts), shown only when Anoesia is on a server
+  with a password set (docs/hosting.md). Everything it needs is in this
+  file, because nothing else is served until you've logged in.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Anoesia</title>
+    <meta name="theme-color" content="#1e1f22" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Anoesia" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #313338;
+        --panel: #2b2d31;
+        --text: #f2f3f5;
+        --muted: #b5bac1;
+        --accent: #8b7cf6;
+        --error: #fa777c;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        padding-top: max(16px, env(safe-area-inset-top));
+      }
+      form {
+        width: 100%;
+        max-width: 340px;
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 28px 24px;
+        display: grid;
+        gap: 14px;
+        text-align: center;
+      }
+      img { width: 64px; height: 64px; margin: 0 auto; border-radius: 14px; }
+      h1 { font-size: 22px; margin: 0; }
+      p { margin: 0; color: var(--muted); font-size: 14px; }
+      input {
+        width: 100%;
+        font: inherit;
+        /* 16px or more, so iPhone doesn't zoom in on focus. */
+        font-size: 16px;
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid #1e1f22;
+        background: #1e1f22;
+        color: var(--text);
+      }
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 12px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: white;
+      }
+      button:disabled { opacity: 0.6; }
+      .error { color: var(--error); min-height: 1.4em; }
+      .hidden-name { position: absolute; left: -9999px; width: 1px; height: 1px; }
+    </style>
+  </head>
+  <body>
+    <form id="login" method="post" action="api/login">
+      <img src="icon.svg" alt="" />
+      <h1>Anoesia</h1>
+      <p>Enter your password to come in.</p>
+      <!-- A name for password managers (iCloud Keychain) to save the password under. -->
+      <input class="hidden-name" type="text" name="username" value="anoesia" autocomplete="username" tabindex="-1" aria-hidden="true" />
+      <input id="password" type="password" name="password" autocomplete="current-password" placeholder="Password" required autofocus aria-label="Password" />
+      <button type="submit">Log in</button>
+      <p class="error" id="error" role="alert"></p>
+    </form>
+    <script>
+      const form = document.getElementById("login");
+      const error = document.getElementById("error");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = form.querySelector("button");
+        button.disabled = true;
+        error.textContent = "";
+        try {
+          const response = await fetch("api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: form.elements.password.value }),
+          });
+          if (response.ok) {
+            location.replace("./");
+            return;
+          }
+          const data = await response.json().catch(() => ({}));
+          error.textContent = data.error || "Couldn't log in. Try again.";
+          form.elements.password.select();
+        } catch {
+          error.textContent = "Can't reach the server. Check your connection and try again.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

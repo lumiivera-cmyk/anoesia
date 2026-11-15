@@ -1,0 +1,38 @@
+# Anoesia as a system service, beside Amaedori (see docs/hosting.md).
+# It starts with the server, restarts if it stops, and can't touch
+# anything outside its own folder.
+[Unit]
+Description=Anoesia
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=anoesia
+Group=anoesia
+WorkingDirectory=/opt/anoesia
+Environment=ANOESIA_HOSTED=1
+# Your time zone, for {{date}} and {{time}}.
+Environment=TZ=America/Chicago
+ExecStart=/usr/local/bin/bun run src/server.ts
+Restart=always
+RestartSec=3
+# The model can take minutes on a reply; give it a moment to finish saving when stopped.
+TimeoutStopSec=20
+
+# Lock it down: its own folder is the only place it can write.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/anoesia
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
