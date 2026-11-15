@@ -304,6 +304,7 @@ async function revert(path, label) {
 
 export function wireAgent() {
   $("open-agent").addEventListener("click", () => toggleAgent());
+  $("open-agent-phone").addEventListener("click", () => toggleAgent());
   $("agent-close").addEventListener("click", () => toggleAgent(false));
   $("agent-new").addEventListener("click", newSession);
   $("agent-session").addEventListener("change", (e) => openSession(e.target.value || null));
