@@ -104,12 +104,12 @@ export async function openPreview() {
 }
 
 function renderPreview() {
-  $("preview-summary").textContent = `${preview.blocks.length} blocks, sent as ${preview.messages.length} messages, about ${preview.approxTokens} tokens. Macros are filled in.`;
+  $("preview-summary").textContent = `${preview.blocks.length} blocks, sent as ${preview.messages.length} messages, about ${preview.approxTokens} tokens. Macros are filled in. (Random macros may roll differently when it's really sent.)`;
   for (const t of document.querySelectorAll("[data-preview-tab]")) t.classList.toggle("active", t.dataset.previewTab === previewTab);
   const items = previewTab === "blocks" ? preview.blocks : preview.messages.map((m, i) => ({ ...m, label: `Message ${i + 1}` }));
   $("preview-body").innerHTML = items
     .map(
-      (b) => `<div class="block"><div class="block-head"><span class="label">${escapeHtml(b.label)}</span><span class="role ${b.role}">${b.role}</span><span class="muted small">~${Math.round(b.content.length / 4)}</span></div><pre>${escapeHtml(b.content)}</pre></div>`,
+      (b) => `<div class="block"><div class="block-head"><span class="label">${escapeHtml(b.label)}${b.depth !== undefined ? ` <span class="muted small">(depth ${b.depth})</span>` : ""}</span><span class="role ${b.role}">${b.role}</span><span class="muted small">~${Math.round(b.content.length / 4)}</span></div><pre>${escapeHtml(b.content)}</pre></div>`,
     )
     .join("");
 }

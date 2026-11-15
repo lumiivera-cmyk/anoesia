@@ -134,14 +134,16 @@ describe("a scene", () => {
     const preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
     expect(preview.blocks.map((b: any) => `${b.label}:${b.role}`)).toEqual([
       "Main prompt:system",
-      "Old Town (card):system",
-      "The Night Market (card):system",
-      "Bo (card):system",
-      "Cy (card):system",
-      "Hana (persona):system",
-      "Ada Vale (card):system",
+      "Old Town: Description",
+      "The Night Market: Description",
+      "Bo: Description",
+      "Bo: Voice bank",
+      "Cy: Description",
+      "Hana: Description",
+      "Ada Vale: Description",
+      "Ada Vale: Advanced description",
       "Start (no messages yet):user",
-    ]);
+    ].map((l) => (l.includes(":system") || l.includes(":user") ? l : `${l}:system`)));
     expect(preview.approxTokens).toBeGreaterThan(100);
   });
 
@@ -149,6 +151,84 @@ describe("a scene", () => {
     const chat = (await call("POST", "/api/chats", { name: "Empty" })).data;
     const sent = await call("POST", `/api/chats/${chat.id}/send`, { content: "Hi" });
     expect(sent.data.error).toContain("connection profile");
+  });
+});
+
+describe("the prompts page", () => {
+  test("a new chat's blocks: main prompt, each cast card's fields in cast order, then the history", async () => {
+    const { chat } = await setUp();
+    const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    expect(blocks[0]).toMatchObject({ kind: "main", title: "Main prompt", role: "system" });
+    expect(blocks.at(-1)).toMatchObject({ kind: "history", role: "user" });
+    expect(blocks.filter((b: any) => b.kind === "field").length).toBe(3 * 2 + 3 + 1 + 3 + 3 + 3);
+  });
+
+  test("editing a linked block edits its source; the main prompt is shared", async () => {
+    const { chat, cast } = await setUp();
+    const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    const adaDescription = blocks.find((b: any) => b.cardId === cast[5] && b.title === "Description");
+    await call("PATCH", `/api/blocks/${adaDescription.id}`, { content: "Ada, edited from the prompts page." });
+    const card = (await call("GET", "/api/state")).data.cards.find((c: any) => c.id === cast[5]);
+    expect(card.fields[0].content).toBe("Ada, edited from the prompts page.");
+
+    const main = blocks[0];
+    await call("PATCH", `/api/blocks/${main.id}`, { content: "Shared main prompt." });
+    expect((await call("GET", "/api/state")).data.settings.mainPrompt).toBe("Shared main prompt.");
+    const other = (await call("POST", "/api/chats", { name: "Other" })).data;
+    expect((await call("GET", `/api/chats/${other.id}/blocks`)).data[0].content).toBe("Shared main prompt.");
+  });
+
+  test("own blocks: add, role, depth, switch off, reorder, delete; what's sent follows", async () => {
+    const { chat } = await setUp();
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Hi." });
+    const note = (await call("POST", `/api/chats/${chat.id}/blocks`, { title: "Pace", content: "(Short, {{user}}.)" })).data;
+    await call("PATCH", `/api/blocks/${note.id}`, { role: "user", depth: 0 });
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Again." });
+    const sent = received.at(-1)!.messages;
+    expect(sent.at(-1)).toEqual({ role: "user", content: "(Short, Hana.)" });
+    expect(sent.at(-2)).toEqual({ role: "user", content: "Again." });
+
+    await call("PATCH", `/api/blocks/${note.id}`, { enabled: false });
+    const off = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    expect(off.blocks.some((b: any) => b.label === "Pace")).toBe(false);
+
+    // Move the history to the top: everything else follows it.
+    const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    const history = blocks.find((b: any) => b.kind === "history");
+    const ids = [history.id, ...blocks.filter((b: any) => b !== history && b.id !== history.id).map((b: any) => b.id)];
+    expect((await call("PUT", `/api/chats/${chat.id}/blocks`, { ids })).data[0].kind).toBe("history");
+    expect((await call("PUT", `/api/chats/${chat.id}/blocks`, { ids: ids.slice(1) })).status).toBe(400);
+
+    expect((await call("DELETE", `/api/blocks/${history.id}`)).status).toBe(400);
+    expect((await call("DELETE", `/api/blocks/${note.id}`)).status).toBe(200);
+  });
+
+  test("cast changes: a new card's fields go before the history, a removed card's go, a new field joins its card", async () => {
+    const { chat, cast } = await setUp();
+    const extra = (await call("POST", "/api/cards", { name: "Bobby", fields: [{ key: "description", content: "The manager." }] })).data;
+    await call("PATCH", `/api/chats/${chat.id}`, { cast: [...cast.filter((id) => id !== cast[2]), extra.id] });
+    let blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    expect(blocks.at(-2)).toMatchObject({ cardId: extra.id, title: "System prompt" });
+    expect(blocks.some((b: any) => b.cardId === cast[2])).toBe(false);
+
+    const ada = (await call("GET", "/api/state")).data.cards.find((c: any) => c.id === cast[5]);
+    await call("PATCH", `/api/cards/${ada.id}`, { fields: [...ada.fields, { key: "custom", title: "Voice bank", content: "Dry." }] });
+    blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    const adaBlocks = blocks.map((b: any, i: number) => [b, i]).filter(([b]: any) => b.cardId === ada.id);
+    expect(adaBlocks.at(-1)[0].title).toBe("Voice bank");
+    // Right after Ada's other fields, not at the end.
+    expect(adaBlocks.at(-1)[1]).toBe(adaBlocks.at(-2)[1] + 1);
+  });
+
+  test("setvar sticks only when a prompt is really sent, not on preview", async () => {
+    const { chat } = await setUp();
+    const note = (await call("POST", `/api/chats/${chat.id}/blocks`, { content: "{{incvar::turn}}Turn {{getvar::turn}}." })).data;
+    void note;
+    await call("GET", `/api/chats/${chat.id}/preview`);
+    await call("GET", `/api/chats/${chat.id}/preview`);
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "One." });
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Two." });
+    expect(received.at(-1)!.messages[0]!.content).toContain("Turn 2.");
   });
 });
 

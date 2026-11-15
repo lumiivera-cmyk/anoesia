@@ -1,143 +1,167 @@
 /**
- * Putting the prompt together.
+ * Putting the prompt together from a chat's blocks (the prompts page).
  *
- * Step 1 builds it in a fixed order:
+ * The blocks go in the order shown. The chat history block stands for the
+ * messages, and a block with a depth goes inside the history instead,
+ * that many messages from the end (0 = after the last message). Switched
+ * off blocks and empty ones are left out.
  *
- *   1. the main prompt (system)
- *   2. one block per card in the chat's cast, in cast order (system)
- *   3. the chat history (user / assistant)
+ * A card's fields are separate blocks. The first of a run of one card's
+ * blocks gets a `## Name` heading, so the model can tell whose text it is
+ * even when you move a field away from the rest of its card. Custom fields
+ * get a `### Title` heading of their own.
  *
- * Every piece is a labelled block, so the preview shows exactly where each
- * part of the prompt came from. Step 2 (the prompts page) makes the order,
- * the roles and the depth of each block yours to set.
+ * Macros are filled in the order the blocks are sent, so `{{setvar}}` in
+ * an early block is seen by `{{getvar}}` in a later one.
  *
  * Adjacent system blocks are sent as one system message, because some
  * models only accept one.
  */
 
-import type { Card, ChatMessage, Message } from "./types.ts";
+import { fillMacros, type MacroEnv } from "./macros.ts";
+import type { Card, ChatMessage, Message, PromptBlock } from "./types.ts";
+
+export { listNames } from "./macros.ts";
 
 export const DEFAULT_MAIN_PROMPT = `This is a roleplay between {{user}} and you, the narrator. You write the world and everyone in it: {{cast}}. {{user}} is written only by the user: never write their words, actions or thoughts.`;
 
 /** One piece of the prompt, as the preview shows it. */
-export interface Block {
-  /** What it is, e.g. "Main prompt", "Rumi Kang (card)", "Chat history". */
+export interface SentBlock {
+  /** What it is, e.g. "Main prompt", "Rumi Kang: Description", "Hana". */
   label: string;
-  /** Where its text lives, e.g. "settings", "card:<id>", "message:<id>". */
+  /** Where its text lives, e.g. "settings", "card:<id>", "block:<id>", "message:<id>". */
   source: string;
   role: ChatMessage["role"];
+  /** With macros filled and any heading added: exactly what's sent. */
   content: string;
+  /** For a block placed inside the history: its depth. */
+  depth?: number;
 }
 
 export interface AssembledPrompt {
-  blocks: Block[];
+  blocks: SentBlock[];
   /** What's sent: the blocks, with adjacent system blocks joined. */
   messages: ChatMessage[];
   /** A rough count (about four characters a token). */
   approxTokens: number;
+  /** The variables after this prompt's macros ran (saved only when the prompt is actually sent). */
+  vars: Record<string, string>;
+  globals: Record<string, string>;
 }
 
 export interface PromptInput {
-  mainPrompt: string;
-  /** The chat's cast, in order. */
-  cast: Card[];
+  blocks: PromptBlock[];
+  /** Every card a block points at, by id. */
+  cards: Map<string, Card>;
   messages: Message[];
+  vars?: Record<string, string>;
+  globals?: Record<string, string>;
   now?: Date;
+  random?: () => number;
 }
 
-// ---------------------------------------------------------------- macros
-
-export interface MacroContext {
-  user: string;
-  char: string;
-  cast: string;
-  now: Date;
-}
-
-/**
- * The step 1 macros: `{{user}}`, `{{char}}`, `{{cast}}`, `{{date}}`,
- * `{{time}}`, and `{{// comments}}`, which are removed. Names match
- * SillyTavern's and Lumiverse's, so cards keep working. Unknown macros are
- * left as they are, so you can see them in the preview.
- */
-export function fillMacros(text: string, ctx: MacroContext): string {
-  return text
-    .replace(/\{\{\/\/[\s\S]*?\}\}/g, "")
-    .replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, name: string) => {
-      switch (name.toLowerCase()) {
-        case "user":
-          return ctx.user;
-        case "char":
-          return ctx.char;
-        case "cast":
-          return ctx.cast;
-        case "date":
-          return ctx.now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-        case "time":
-          return ctx.now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-        default:
-          return whole;
-      }
-    });
-}
-
-/** "Rumi", "Rumi and Mira", "Rumi, Mira and Zoey". */
-export function listNames(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-}
-
-/** The macro values for a cast: the first persona is `{{user}}`; characters that aren't personas are `{{cast}}`. */
-export function macroContext(cast: Card[], now = new Date()): MacroContext {
-  const persona = cast.find((c) => c.isPersona);
-  const characters = cast.filter((c) => !c.isPersona && c.isCharacter).map((c) => c.name);
-  return { user: persona?.name ?? "User", char: characters[0] ?? "", cast: listNames(characters) || "the characters of the story", now };
-}
-
-// -------------------------------------------------------------- assembly
-
-/** A card as one block of text: its name, then each field with content. */
-export function cardText(card: Card): string {
-  const heading = card.isPersona ? `## ${card.name} (played by the user)` : `## ${card.name}`;
-  const parts = [heading];
-  for (const f of card.fields) {
-    const text = f.content.trim();
-    if (!text) continue;
-    parts.push(f.key === "custom" ? `### ${f.title}\n${text}` : text);
+/** Who's who, from the cards in the blocks, in block order. */
+export function castOf(blocks: PromptBlock[], cards: Map<string, Card>): { persona: Card | null; characters: Card[] } {
+  const seen: Card[] = [];
+  for (const b of blocks) {
+    const card = b.cardId ? cards.get(b.cardId) : undefined;
+    if (card && !seen.includes(card)) seen.push(card);
   }
-  return parts.join("\n\n");
+  return { persona: seen.find((c) => c.isPersona) ?? null, characters: seen.filter((c) => !c.isPersona && c.isCharacter) };
+}
+
+/** An item in send order, before macros. */
+interface Item {
+  label: string;
+  source: string;
+  role: ChatMessage["role"];
+  text: string;
+  card?: Card;
+  depth?: number;
+  /** For a field block: the card it belongs to, for headings. */
+  runCard?: Card;
 }
 
 export function assemblePrompt(input: PromptInput): AssembledPrompt {
-  const ctx = macroContext(input.cast, input.now);
-  const blocks: Block[] = [];
-  const main = fillMacros(input.mainPrompt, ctx).trim();
-  if (main) blocks.push({ label: "Main prompt", source: "settings", role: "system", content: main });
+  const { persona, characters } = castOf(input.blocks, input.cards);
+  const history = input.messages.filter((m) => m.content.trim());
+  const userName = persona?.name ?? "User";
+  const lastOf = (role?: Message["role"]) => [...history].reverse().find((m) => !role || m.role === role)?.content ?? "";
+  const env: MacroEnv = {
+    user: userName,
+    char: characters[0]?.name ?? "",
+    cast: characters.map((c) => c.name),
+    lastMessage: lastOf(),
+    lastUserMessage: lastOf("user"),
+    lastCharMessage: lastOf("assistant"),
+    messageCount: history.length,
+    now: input.now ?? new Date(),
+    vars: { ...input.vars },
+    globals: { ...input.globals },
+    random: input.random,
+  };
 
-  for (const card of input.cast) {
-    const content = fillMacros(cardText(card), { ...ctx, char: card.isPersona ? ctx.char : card.name }).trim();
-    if (content) blocks.push({ label: `${card.name} (${card.isPersona ? "persona" : "card"})`, source: `card:${card.id}`, role: "system", content });
+  const blockItem = (b: PromptBlock): Item | null => {
+    if (!b.enabled || b.kind === "history" || !b.content.trim()) return null;
+    if (b.kind === "field") {
+      const card = input.cards.get(b.cardId ?? "");
+      if (!card) return null;
+      const field = card.fields.find((f) => f.id === b.fieldId);
+      const text = field?.key === "custom" ? `### ${b.title}\n${b.content.trim()}` : b.content.trim();
+      return { label: `${card.name}: ${b.title}`, source: `card:${card.id}`, role: b.role, text, card, runCard: card, depth: b.depth ?? undefined };
+    }
+    return { label: b.title, source: b.kind === "main" ? "settings" : `block:${b.id}`, role: b.role, text: b.content.trim(), depth: b.depth ?? undefined };
+  };
+
+  // Blocks with a depth go inside the history: gaps[g] holds what comes before message g (gaps[n] after the last).
+  const gaps: Item[][] = Array.from({ length: history.length + 1 }, () => []);
+  for (const b of input.blocks) {
+    if (b.depth === null || b.kind === "history") continue;
+    const item = blockItem(b);
+    if (item) gaps[Math.max(0, history.length - b.depth)]!.push(item);
   }
 
-  for (const m of input.messages) {
-    if (!m.content.trim()) continue;
-    blocks.push({ label: m.role === "user" ? `${ctx.user}` : "Narrator", source: `message:${m.id}`, role: m.role, content: m.content });
+  const items: Item[] = [];
+  for (const b of input.blocks) {
+    if (b.kind === "history") {
+      history.forEach((m, i) => {
+        items.push(...gaps[i]!);
+        items.push({ label: m.role === "user" ? userName : "Narrator", source: `message:${m.id}`, role: m.role, text: m.content });
+      });
+      items.push(...gaps[history.length]!);
+      continue;
+    }
+    if (b.depth !== null) continue;
+    const item = blockItem(b);
+    if (item) items.push(item);
   }
 
   // Most models need something after the system prompt to answer. With no
   // messages yet, this says so out loud instead of sending a hidden nudge.
-  if (!input.messages.some((m) => m.content.trim())) {
-    blocks.push({ label: "Start (no messages yet)", source: "start", role: "user", content: "(Begin the scene.)" });
+  if (history.length === 0) items.push({ label: "Start (no messages yet)", source: "start", role: "user", text: "(Begin the scene.)" });
+
+  // Headings, then macros, in send order.
+  const sent: SentBlock[] = [];
+  let previousCard: Card | undefined;
+  for (const item of items) {
+    let text = item.text;
+    if (item.runCard && item.runCard !== previousCard) {
+      text = `${item.runCard.isPersona ? `## ${item.runCard.name} (played by the user)` : `## ${item.runCard.name}`}\n\n${text}`;
+    }
+    previousCard = item.runCard;
+    const content = fillMacros(text, { ...env, char: item.card && !item.card.isPersona ? item.card.name : env.char }).trim();
+    if (!content) continue;
+    sent.push({ label: item.label, source: item.source, role: item.role, content, ...(item.depth !== undefined ? { depth: item.depth } : {}) });
   }
 
   const messages: ChatMessage[] = [];
-  for (const b of blocks) {
+  for (const b of sent) {
     const last = messages.at(-1);
     if (b.role === "system" && last?.role === "system") last.content += `\n\n${b.content}`;
     else messages.push({ role: b.role, content: b.content });
   }
   const chars = messages.reduce((n, m) => n + m.content.length, 0);
-  return { blocks, messages, approxTokens: Math.round(chars / 4) };
+  return { blocks: sent, messages, approxTokens: Math.round(chars / 4), vars: env.vars, globals: env.globals };
 }
 
 /**

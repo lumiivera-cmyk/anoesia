@@ -6,11 +6,13 @@ import { loadState, showError, state } from "./core.js";
 import { openChat, renderChatList, wireChat } from "./chat.js";
 import { wireCards } from "./cards.js";
 import { wireSettings } from "./settings.js";
+import { wirePrompts } from "./prompts.js";
 
 async function start() {
   wireChat();
   wireCards();
   wireSettings();
+  wirePrompts();
   try {
     await loadState();
   } catch (error) {
