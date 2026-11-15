@@ -112,6 +112,12 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (scope, key)
   );
   `,
+
+  // 3: card colours (a preset name or a hex), and the last custom one picked.
+  `
+  ALTER TABLE cards ADD COLUMN colour TEXT NOT NULL DEFAULT 'violet';
+  ALTER TABLE cards ADD COLUMN custom_colour TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

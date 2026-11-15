@@ -11,6 +11,7 @@ import { openDatabase } from "./db.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
 import { addressOf, cookieFor, isPublicPath, Login, overHttps, tokenOf } from "./login.ts";
 import { ApiError, CancelledError, createChatCompletion, listModels, type ApiOptions } from "./nanogpt.ts";
+import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { Store } from "./store.ts";
 import type { Message, ProviderId } from "./types.ts";
@@ -96,7 +97,7 @@ export function createApp(config: Config): App {
     let p: string[] | undefined;
 
     if (path === "/api/state" && method === "GET") {
-      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey) });
+      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey), macros: KNOWN_MACROS });
     }
     if (path === "/api/settings" && method === "PATCH") return json(store.updateSettings(await body()));
 

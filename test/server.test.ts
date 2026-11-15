@@ -251,11 +251,48 @@ describe("cards", () => {
     expect(removed.fields).toHaveLength(3);
   });
 
+  test("fields can be reordered, base fields included; a chat's folder follows, a field moved out stays", async () => {
+    const card = (await call("POST", "/api/cards", { name: "Rumi", fields: [{ key: "custom", title: "Voice bank", content: "Dry." }] })).data;
+    const chat = (await call("POST", "/api/chats", { cast: [card.id] })).data;
+    let blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    // Move the voice bank out of the folder, after the history.
+    const voice = blocks.find((b: any) => b.title === "Voice bank");
+    const ids = blocks.map((b: any) => b.id).filter((id: string) => id !== voice.id);
+    await call("PUT", `/api/chats/${chat.id}/blocks`, { ids: [...ids, voice.id] });
+    const [desc, adv, sys, custom] = card.fields;
+    const moved = (await call("PATCH", `/api/cards/${card.id}`, { fields: [sys, desc, custom, adv] })).data;
+    expect(moved.fields.map((f: any) => f.key)).toEqual(["system", "description", "custom", "advanced"]);
+    blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    expect(blocks.map((b: any) => b.title)).toEqual(["Main prompt", "System prompt", "Description", "Advanced description", "Chat history", "Voice bank"]);
+  });
+
+  test("a card's colour is a preset or a hex, and a custom colour is remembered", async () => {
+    const card = (await call("POST", "/api/cards", { name: "Rumi" })).data;
+    expect(card.colour).toBe("violet");
+    const custom = (await call("PATCH", `/api/cards/${card.id}`, { colour: "ffb547" })).data;
+    expect(custom).toMatchObject({ colour: "#FFB547", customColour: "#FFB547" });
+    const back = (await call("PATCH", `/api/cards/${card.id}`, { colour: "pink" })).data;
+    expect(back).toMatchObject({ colour: "pink", customColour: "#FFB547" });
+    expect((await call("PATCH", `/api/cards/${card.id}`, { colour: "teal" })).status).toBe(400);
+  });
+
   test("deleting a card takes it out of casts", async () => {
     const card = (await call("POST", "/api/cards", { name: "Rumi" })).data;
     const chat = (await call("POST", "/api/chats", { cast: [card.id] })).data;
     await call("DELETE", `/api/cards/${card.id}`);
     expect((await call("GET", `/api/chats/${chat.id}`)).data.chat.cast).toEqual([]);
+  });
+});
+
+describe("settings", () => {
+  test("background settings are checked and kept", async () => {
+    const start = (await call("GET", "/api/state")).data.settings.background;
+    expect(start).toEqual({ photo: "crossing", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
+    const changed = (await call("PATCH", "/api/settings", { background: { photo: "downpour", dim: 0.1, window: 0.5 } })).data.background;
+    expect(changed).toEqual({ photo: "downpour", finish: "tamenuri", tint: 0.6, dim: 0.1, window: 0.5 });
+    expect((await call("PATCH", "/api/settings", { background: { dim: 0.9 } })).status).toBe(400);
+    expect((await call("PATCH", "/api/settings", { background: { photo: "moon" } })).status).toBe(400);
+    expect((await call("PATCH", "/api/settings", { background: { window: null } })).data.background.window).toBeNull();
   });
 });
 

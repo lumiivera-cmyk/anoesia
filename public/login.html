@@ -9,7 +9,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Anoesia</title>
-    <meta name="theme-color" content="#1e1f22" />
+    <meta name="theme-color" content="#08080C" />
     <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -18,19 +18,23 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #313338;
-        --panel: #2b2d31;
-        --text: #f2f3f5;
-        --muted: #b5bac1;
-        --accent: #8b7cf6;
-        --error: #fa777c;
+        /* the lacquer theme's colours (anoesia.css), copied because nothing else is served before logging in */
+        --bg: #08080C;
+        --panel: #15131C;
+        --text: #F2EEF9;
+        --muted: #CBC5D9;
+        --accent: #4DB8FF;
+        --on-accent: #062A44;
+        --error: #FF8FA3;
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
       body {
-        background: var(--bg);
+        background: radial-gradient(ellipse 30% 40% at 12% 70%, rgba(168, 108, 255, 0.12), transparent 70%),
+          radial-gradient(ellipse 28% 45% at 90% 30%, rgba(255, 79, 216, 0.11), transparent 70%),
+          radial-gradient(ellipse 40% 22% at 45% 4%, rgba(77, 184, 255, 0.1), transparent 70%), var(--bg);
         color: var(--text);
-        font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+        font: 16px/1.4 "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
         display: grid;
         place-items: center;
         padding: 16px;
@@ -40,13 +44,14 @@
         width: 100%;
         max-width: 340px;
         background: var(--panel);
-        border-radius: 12px;
+        border-radius: 22px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 48px rgba(0, 0, 0, 0.55);
         padding: 28px 24px;
         display: grid;
         gap: 14px;
         text-align: center;
       }
-      img { width: 64px; height: 64px; margin: 0 auto; border-radius: 14px; }
+      img { width: 64px; height: 64px; margin: 0 auto; border-radius: 16px; }
       h1 { font-size: 22px; margin: 0; }
       p { margin: 0; color: var(--muted); font-size: 14px; }
       input {
@@ -55,19 +60,23 @@
         /* 16px or more, so iPhone doesn't zoom in on focus. */
         font-size: 16px;
         padding: 12px;
-        border-radius: 8px;
-        border: 1px solid #1e1f22;
-        background: #1e1f22;
+        border-radius: 12px;
+        border: 0;
+        background: #0B0A10;
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
         color: var(--text);
       }
       button {
         font: inherit;
-        font-weight: 600;
+        font-weight: 700;
         padding: 12px;
+        min-height: 44px;
         border: 0;
-        border-radius: 8px;
+        border-radius: 12px;
         background: var(--accent);
-        color: white;
+        color: var(--on-accent);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 12px rgba(77, 184, 255, 0.45);
+        cursor: pointer;
       }
       button:disabled { opacity: 0.6; }
       .error { color: var(--error); min-height: 1.4em; }

@@ -9,14 +9,22 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_FIELDS, type ParsedCard } from "./cards.ts";
 import { NotFoundError, ValidationError, newId } from "./errors.ts";
 import { DEFAULT_MAIN_PROMPT } from "./prompt.ts";
-import type { BlockKind, Card, CardField, Chat, FieldKey, Message, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
+import type { Background, BlockKind, Card, CardField, Chat, FieldKey, Finish, Message, PhotoName, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
 
 const now = () => new Date().toISOString();
+
+export const DEFAULT_BACKGROUND: Background = { photo: "crossing", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
 
 const DEFAULT_SETTINGS: Settings = {
   rpProfileId: "",
   mainPrompt: DEFAULT_MAIN_PROMPT,
+  background: DEFAULT_BACKGROUND,
 };
+
+const PHOTOS: PhotoName[] = ["none", "crossing", "purple alley", "kimbap corner", "pink street", "downpour", "lanterns"];
+const FINISHES: Finish[] = ["roiro", "tamenuri", "shunkei"];
+const PRESET_COLOURS = ["violet", "blue", "pink"];
+const HEX = /^#[0-9A-F]{6}$/;
 
 type Row = Record<string, unknown>;
 
@@ -29,6 +37,7 @@ export class Store {
     const rows = this.db.query("SELECT key, value FROM settings").all() as { key: string; value: string }[];
     const out: Settings = { ...DEFAULT_SETTINGS };
     for (const row of rows) if (row.key in out) (out as unknown as Row)[row.key] = JSON.parse(row.value);
+    out.background = { ...DEFAULT_BACKGROUND, ...out.background };
     if (out.rpProfileId && !this.findProfile(out.rpProfileId)) out.rpProfileId = "";
     return out;
   }
@@ -44,6 +53,7 @@ export class Store {
       if (typeof raw.mainPrompt !== "string") throw new ValidationError("The main prompt must be text.");
       clean.mainPrompt = raw.mainPrompt;
     }
+    if (raw.background !== undefined) clean.background = backgroundInput(raw.background, this.settings().background);
     const put = this.db.query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
     for (const [key, value] of Object.entries(clean)) put.run(key, JSON.stringify(value));
     return this.settings();
@@ -150,8 +160,8 @@ export class Store {
     const given = Array.isArray(raw.fields) ? (raw.fields as Row[]).map(fieldInput) : [];
     this.db.transaction(() => {
       this.db
-        .query("INSERT INTO cards (id, name, is_persona, is_character, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(id, name, raw.isPersona === true ? 1 : 0, raw.isCharacter === false ? 0 : 1, at, at);
+        .query("INSERT INTO cards (id, name, is_persona, is_character, colour, custom_colour, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, name, raw.isPersona === true ? 1 : 0, raw.isCharacter === false ? 0 : 1, raw.colour === undefined ? "violet" : colourInput(raw.colour), "", at, at);
       const insert = this.db.query("INSERT INTO card_fields (id, card_id, key, title, content, position) VALUES (?, ?, ?, ?, ?, ?)");
       let position = 0;
       for (const d of DEFAULT_FIELDS) {
@@ -164,10 +174,12 @@ export class Store {
   }
 
   /**
-   * Change a card: its name, switches, and fields. `fields`, when given, is
-   * the whole list in order: default fields are matched by key and keep
-   * their ids, custom fields by id (new ones have none), and custom fields
-   * left out are removed.
+   * Change a card: its name, switches, colour and fields. `fields`, when
+   * given, is the whole list in the order they're sent: default fields are
+   * matched by key and keep their ids (they can move but never go), custom
+   * fields by id (new ones have none), and custom fields left out are
+   * removed. A new order also reorders the card's folder in every chat
+   * where its fields still sit together; a field a chat moved out stays put.
    */
   updateCard(id: string, raw: Row): Card {
     const card = this.card(id);
@@ -175,21 +187,37 @@ export class Store {
       const name = raw.name !== undefined ? cleanName(raw.name) : card.name;
       const isPersona = raw.isPersona !== undefined ? raw.isPersona === true : card.isPersona;
       const isCharacter = raw.isCharacter !== undefined ? raw.isCharacter === true : card.isCharacter;
-      this.db.query("UPDATE cards SET name = ?, is_persona = ?, is_character = ?, updated_at = ? WHERE id = ?").run(name, isPersona ? 1 : 0, isCharacter ? 1 : 0, now(), id);
+      const colour = raw.colour !== undefined ? colourInput(raw.colour) : card.colour;
+      // A custom colour is remembered after switching back to a preset.
+      let customColour = raw.customColour !== undefined ? (raw.customColour === "" ? "" : colourInput(raw.customColour)) : card.customColour;
+      if (colour.startsWith("#")) customColour = colour;
+      if (customColour && !customColour.startsWith("#")) throw new ValidationError("A custom colour is a hex like #FFB547.");
+      this.db
+        .query("UPDATE cards SET name = ?, is_persona = ?, is_character = ?, colour = ?, custom_colour = ?, updated_at = ? WHERE id = ?")
+        .run(name, isPersona ? 1 : 0, isCharacter ? 1 : 0, colour, customColour, now(), id);
       if (Array.isArray(raw.fields)) {
         const incoming = (raw.fields as Row[]).map((f) => ({ ...fieldInput(f), id: typeof f.id === "string" ? f.id : "" }));
         const keep = new Set<string>();
         const update = this.db.query("UPDATE card_fields SET title = ?, content = ?, position = ? WHERE id = ? AND card_id = ?");
         const insert = this.db.query("INSERT INTO card_fields (id, card_id, key, title, content, position) VALUES (?, ?, ?, ?, ?, ?)");
-        let position = 0;
-        // Default fields always exist, in their own order, first.
-        for (const d of DEFAULT_FIELDS) {
-          const existing = card.fields.find((f) => f.key === d.key)!;
-          const given = incoming.find((f) => f.key === d.key);
-          update.run(d.title, given ? given.content : existing.content, position++, existing.id, id);
-          keep.add(existing.id);
+        // Default fields that weren't sent keep their text and their old place; the rest go in the order given.
+        const list = [...incoming];
+        for (const existing of card.fields) {
+          if (existing.key === "custom" || incoming.some((f) => f.key === existing.key)) continue;
+          list.splice(Math.min(existing.position, list.length), 0, { key: existing.key, title: existing.title, content: existing.content, id: "" });
         }
-        for (const f of incoming.filter((f) => f.key === "custom")) {
+        let position = 0;
+        const seen = new Set<string>();
+        for (const f of list) {
+          if (f.key !== "custom") {
+            if (seen.has(f.key)) throw new ValidationError(`The ${f.key} field is listed twice.`);
+            seen.add(f.key);
+            const d = DEFAULT_FIELDS.find((x) => x.key === f.key)!;
+            const existing = card.fields.find((x) => x.key === f.key)!;
+            update.run(d.title, f.content, position++, existing.id, id);
+            keep.add(existing.id);
+            continue;
+          }
           const existing = card.fields.find((c) => c.id === f.id && c.key === "custom");
           if (existing) {
             update.run(f.title, f.content, position++, existing.id, id);
@@ -201,9 +229,35 @@ export class Store {
           }
         }
         for (const f of card.fields) if (!keep.has(f.id)) this.db.query("DELETE FROM card_fields WHERE id = ?").run(f.id);
+        this.reorderFolders(id);
       }
     })();
     return this.card(id);
+  }
+
+  /** In every chat, put a card's run of field blocks in the card's field order. */
+  private reorderFolders(cardId: string): void {
+    const order = new Map((this.db.query("SELECT id, position FROM card_fields WHERE card_id = ?").all(cardId) as { id: string; position: number }[]).map((f) => [f.id, f.position]));
+    const chats = this.db.query("SELECT DISTINCT chat_id FROM prompt_blocks WHERE card_id = ?").all(cardId) as { chat_id: string }[];
+    const update = this.db.query("UPDATE prompt_blocks SET position = ? WHERE id = ?");
+    for (const { chat_id } of chats) {
+      const rows = this.db.query("SELECT id, card_id, field_id, position FROM prompt_blocks WHERE chat_id = ? ORDER BY position").all(chat_id) as Row[];
+      // The card's longest run of blocks is its folder.
+      let best: [number, number] = [0, 0];
+      for (let i = 0; i < rows.length; ) {
+        if (rows[i]!.card_id !== cardId) {
+          i++;
+          continue;
+        }
+        let j = i;
+        while (j < rows.length && rows[j]!.card_id === cardId) j++;
+        if (j - i > best[1] - best[0]) best = [i, j];
+        i = j;
+      }
+      const run = rows.slice(best[0], best[1]);
+      const positions = run.map((r) => r.position as number);
+      run.sort((a, b) => (order.get(a.field_id as string) ?? 0) - (order.get(b.field_id as string) ?? 0)).forEach((r, k) => update.run(positions[k]!, r.id as string));
+    }
   }
 
   deleteCard(id: string): void {
@@ -516,6 +570,8 @@ function toCard(r: Row, fields: CardField[]): Card {
     name: r.name as string,
     isPersona: r.is_persona === 1,
     isCharacter: r.is_character === 1,
+    colour: (r.colour as string | undefined) ?? "violet",
+    customColour: (r.custom_colour as string | undefined) ?? "",
     fields,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
@@ -579,6 +635,43 @@ function fieldInput(raw: Row): { key: FieldKey; title: string; content: string }
   const title = typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : key === "custom" ? "" : (key as string);
   if (key === "custom" && !title) throw new ValidationError("A custom field needs a title.");
   return { key: key as FieldKey, title, content: raw.content };
+}
+
+/** A preset colour name, or a hex (any case, with or without #), as `#RRGGBB`. */
+function colourInput(value: unknown): string {
+  if (typeof value !== "string") throw new ValidationError("A colour is violet, blue, pink or a hex like #FFB547.");
+  if (PRESET_COLOURS.includes(value)) return value;
+  const hex = `#${value.trim().replace(/^#/, "").toUpperCase()}`;
+  if (!HEX.test(hex)) throw new ValidationError("A colour is violet, blue, pink or a hex like #FFB547.");
+  return hex;
+}
+
+function backgroundInput(raw: unknown, current: Background): Background {
+  if (typeof raw !== "object" || raw === null) throw new ValidationError("The background settings must be an object.");
+  const b = raw as Row;
+  const out: Background = { ...current };
+  if (b.photo !== undefined) {
+    if (!PHOTOS.includes(b.photo as PhotoName)) throw new ValidationError("Unknown background photo.");
+    out.photo = b.photo as PhotoName;
+  }
+  if (b.finish !== undefined) {
+    if (!FINISHES.includes(b.finish as Finish)) throw new ValidationError("The finish is roiro, tamenuri or shunkei.");
+    out.finish = b.finish as Finish;
+  }
+  const range = (key: "tint" | "dim", min: number, max: number) => {
+    if (b[key] === undefined) return;
+    const n = Number(b[key]);
+    if (typeof b[key] !== "number" || !Number.isFinite(n) || n < min || n > max) throw new ValidationError(`${key} goes from ${min} to ${max}.`);
+    out[key] = n;
+  };
+  range("tint", 0, 1);
+  range("dim", 0, 0.8);
+  if (b.window !== undefined) {
+    if (b.window === null) out.window = null;
+    else if (typeof b.window !== "number" || b.window < 0.3 || b.window > 0.95) throw new ValidationError("window goes from 0.3 to 0.95.");
+    else out.window = b.window;
+  }
+  return out;
 }
 
 const PROVIDERS = ["nanogpt", "vertex"];

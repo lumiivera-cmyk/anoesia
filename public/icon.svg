@@ -1,10 +1,27 @@
 <!--
-  Amaedori's app icon: a quill over a speech bubble, on the accent colour.
-  The artwork stays inside the central 80% so it survives being cropped to a
-  circle or squircle by the phone's launcher ("maskable" in the manifest).
+  Anoesia's app icon: the wordmark's three beads (violet, blue, pink) on
+  black lacquer. Not a designed icon yet, only the brand beads; the artwork
+  stays inside the central 80% so a launcher can crop it to a circle.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#8b7cf6"/>
-  <path fill="#fff" d="M136 150h240a32 32 0 0 1 32 32v130a32 32 0 0 1-32 32H232l-66 52v-52h-30a32 32 0 0 1-32-32V182a32 32 0 0 1 32-32Z" opacity=".95"/>
-  <path fill="#8b7cf6" d="M318 176c-52 10-96 52-114 112l-10 34 22-24c8-9 20-14 32-14 40 0 70-30 76-72l-24 8 26-22c-2-8-4-15-8-22Z"/>
+  <defs>
+    <radialGradient id="lac" cx="50%" cy="0%" r="110%">
+      <stop offset="0" stop-color="#232031"/>
+      <stop offset="1" stop-color="#0B0A10"/>
+    </radialGradient>
+    <radialGradient id="v" cx="50%" cy="85%" r="60%"><stop offset="0" stop-color="#EEDCFF"/><stop offset=".45" stop-color="#B488FF"/><stop offset=".9" stop-color="#5B22B8"/></radialGradient>
+    <radialGradient id="b" cx="50%" cy="85%" r="60%"><stop offset="0" stop-color="#E3F5FF"/><stop offset=".45" stop-color="#62C3FF"/><stop offset=".9" stop-color="#0F5FA0"/></radialGradient>
+    <radialGradient id="p" cx="50%" cy="85%" r="60%"><stop offset="0" stop-color="#FFE3F6"/><stop offset=".45" stop-color="#FF6FD8"/><stop offset=".9" stop-color="#A3187F"/></radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#lac)"/>
+  <g stroke="rgba(255,255,255,.35)" stroke-width="3">
+    <circle cx="150" cy="256" r="52" fill="url(#v)"/>
+    <circle cx="256" cy="256" r="52" fill="url(#b)"/>
+    <circle cx="362" cy="256" r="52" fill="url(#p)"/>
+  </g>
+  <g fill="#fff" opacity=".55">
+    <ellipse cx="136" cy="230" rx="16" ry="9"/>
+    <ellipse cx="242" cy="230" rx="16" ry="9"/>
+    <ellipse cx="348" cy="230" rx="16" ry="9"/>
+  </g>
 </svg>

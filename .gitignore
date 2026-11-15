@@ -8,3 +8,7 @@ data/
 .env
 # A Google Cloud service account key, for Vertex AI.
 gcp-key.json
+
+# Background photos are uploaded in settings and live in the data folder;
+# these local copies are for development only.
+public/photos/

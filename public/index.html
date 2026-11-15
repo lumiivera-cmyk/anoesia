@@ -1,205 +1,211 @@
 <!doctype html>
 <!--
-  Anoesia's single page.
+  Anoesia's single page, in the lacquer material (anoesia.css is the design
+  system; app.css lays out these pages).
 
-    .app
-      .sidebar        chats, and buttons for cards and settings
-      .scrim          behind the sidebar when it slides over on a phone
-      .chat-view      the open chat: header (name, cast), messages, composer
-    dialogs           cards, card editor, import, chat settings, settings, preview
+    .bg              the photo behind everything, and its dimmer
+    .side            chats and the app's pages (wide screens; a drawer on a phone)
+    main
+      #view-chat     the open chat: header, messages, composer
+      #view-prompts  this chat's prompt: blocks in send order, and the preview
+      #view-cards    the card library and the card editor
+    dialogs          drawer, menus, sheets, settings, chat settings, import, editors
 
-  Behaviour is in js/ (main.js starts it), styling in style.css.
+  Pages are hash routes (#/chat/<id>, #/prompts, #/cards/<id>); js/main.js
+  starts it all.
 -->
-<html lang="en">
+<html lang="en" class="theme-lacquer">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Anoesia</title>
-    <meta name="theme-color" content="#1e1f22" />
+    <meta name="theme-color" content="#08080C" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&amp;display=swap" />
+    <link rel="stylesheet" href="anoesia.css" />
+    <link rel="stylesheet" href="app.css" />
     <script type="module" src="js/main.js"></script>
   </head>
-  <body>
+  <body class="ground">
+    <div class="bg" aria-hidden="true"><img id="bg-img" alt="" /><div class="bg-dim"></div></div>
+
     <div class="app">
-      <aside class="sidebar surface" id="sidebar">
-        <header class="sidebar-header">
-          <span class="app-name">Anoesia</span>
-          <button type="button" class="icon-button" id="new-chat" title="New chat" aria-label="New chat">＋</button>
-        </header>
-        <nav class="chat-list" id="chat-list" aria-label="Chats"></nav>
-        <footer class="sidebar-footer">
-          <button type="button" class="button" id="open-cards">Cards</button>
-          <button type="button" class="button" id="open-settings">Settings</button>
-        </footer>
-      </aside>
-      <div class="scrim" id="scrim" hidden></div>
+      <aside class="side glass" aria-label="Chats and app" id="side"></aside>
 
-      <main class="chat-view">
-        <header class="chat-header surface">
-          <button type="button" class="icon-button menu-button" id="menu" aria-label="Chats">☰</button>
-          <div class="chat-title">
-            <h1 id="chat-name">No chat open</h1>
-            <div class="cast-line" id="cast-line"></div>
+      <main id="main">
+        <!-- The chat -->
+        <section class="view view-chat" id="view-chat" aria-labelledby="chat-name">
+          <header class="chat-head">
+            <button type="button" class="ghost press ib phone-only" id="open-drawer" aria-label="Chats"></button>
+            <div class="chat-title">
+              <h1 class="disp" id="chat-name">Anoesia</h1>
+              <span class="meta" id="chat-meta"></span>
+            </div>
+            <button type="button" class="btnreset hit44 phone-title phone-only" id="phone-title" aria-label="Chat settings"></button>
+            <ul class="cast-chips wide-only" id="cast-chips" aria-label="Cast"></ul>
+            <div class="head-buttons wide-only">
+              <a class="raised press ib" id="go-preview" href="#/prompts/preview" aria-label="Preview what gets sent" title="Preview"></a>
+              <a class="raised press ib" id="go-prompts" href="#/prompts" aria-label="Prompts page" title="Prompts"></a>
+              <button type="button" class="raised press ib" id="open-chat-settings" aria-label="Chat settings" title="Chat settings"></button>
+            </div>
+            <button type="button" class="ghost press ib phone-only" id="open-chat-menu" aria-label="Preview, prompts and chat settings"></button>
+          </header>
+
+          <div class="msgs-scroll scroll" id="messages-scroll" tabindex="0" aria-label="Messages">
+            <div class="msgs-col" id="messages" aria-live="polite"></div>
           </div>
-          <button type="button" class="button" id="open-prompts" title="Every block of this chat's prompt">Prompts</button>
-          <button type="button" class="button" id="open-preview" title="See exactly what the model gets next">Preview</button>
-          <button type="button" class="icon-button" id="open-chat-settings" title="Chat settings" aria-label="Chat settings">⚙</button>
-        </header>
 
-        <div class="messages" id="messages" aria-live="polite"></div>
-
-        <div class="error-bar" id="error-bar" hidden></div>
-
-        <form class="composer surface" id="composer">
-          <textarea id="composer-input" rows="1" placeholder="Write your turn…" aria-label="Your message"></textarea>
-          <div class="composer-buttons">
-            <button type="button" class="button" id="stop" hidden>Stop</button>
-            <button type="submit" class="button primary" id="send">Send</button>
+          <div class="composer-wrap">
+            <div class="reply-error raised" id="reply-error" role="alert" hidden>
+              <span class="err-text" data-text></span>
+              <button type="button" class="btn ghost press" id="retry">try again</button>
+              <button type="button" class="ghost press ib" id="dismiss-error" aria-label="Dismiss"></button>
+            </div>
+            <form class="composer sunk" id="composer">
+              <label class="sr" for="composer-input" id="composer-label">Write your turn</label>
+              <textarea id="composer-input" rows="2" placeholder="Write your turn…"></textarea>
+              <div class="composer-row">
+                <span class="meta hint wide-only" id="enter-hint">enter sends · shift+enter for a new line</span>
+                <button type="button" class="ghost press btn continue" id="continue" title="Send without new text and let the narrator go on">continue</button>
+                <button type="submit" class="press ib send" id="send" aria-label="Send"></button>
+                <button type="button" class="raised press ib" id="stop" aria-label="Stop writing" hidden></button>
+              </div>
+            </form>
           </div>
-        </form>
+        </section>
+
+        <!-- The prompts page -->
+        <section class="view view-page view-prompts" id="view-prompts" aria-labelledby="prompts-title" hidden>
+          <header class="page-head">
+            <a class="ghost press ib" id="prompts-back" href="#/" aria-label="Back to the chat"></a>
+            <div class="page-title">
+              <h1 class="disp" id="prompts-title">Prompts</h1>
+              <span class="meta" id="prompts-meta"></span>
+            </div>
+            <div class="meter" role="meter" aria-label="Prompt size" id="prompt-meter" aria-valuemin="0">
+              <div class="meter-top"><span class="meter-n" id="meter-n"></span><span class="meta" id="meter-of"></span></div>
+              <div class="sunk meter-bar"><div class="meter-fill" id="meter-fill"></div></div>
+            </div>
+          </header>
+          <div class="seg sunk view-tabs" role="tablist" aria-label="Prompts views" id="prompts-tabs">
+            <button type="button" role="tab" id="tab-blocks" aria-controls="blocks-pane" aria-selected="true">Blocks</button>
+            <button type="button" role="tab" id="tab-preview" aria-controls="preview-pane" aria-selected="false">Preview</button>
+          </div>
+          <div class="prompts-cols">
+            <section class="blocks-pane scroll" id="blocks-pane" role="tabpanel" aria-labelledby="tab-blocks" aria-label="Prompt blocks, in send order" tabindex="0">
+              <ol class="block-list" id="block-list"></ol>
+              <div class="add-row">
+                <button type="button" class="raised press btn" id="add-block"></button>
+              </div>
+              <p class="sr" id="drag-status" role="status" aria-live="assertive"></p>
+            </section>
+            <section class="preview-pane glass deep" id="preview-pane" role="tabpanel" aria-labelledby="tab-preview" aria-label="Preview of what gets sent">
+              <div class="preview-head">
+                <div class="preview-title"><span class="eyebrow">Preview</span><span class="meta">exactly what gets sent right now</span></div>
+                <div class="seg sunk" role="tablist" aria-label="Preview view">
+                  <button type="button" role="tab" id="pv-blocks" aria-selected="true" aria-controls="preview-body">By block</button>
+                  <button type="button" role="tab" id="pv-sent" aria-selected="false" aria-controls="preview-body">As sent</button>
+                </div>
+              </div>
+              <div class="preview-body scroll" id="preview-body" role="tabpanel" tabindex="0" aria-label="Preview content"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Cards -->
+        <section class="view view-page view-cards" id="view-cards" aria-labelledby="cards-title" hidden>
+          <header class="page-head">
+            <a class="ghost press ib phone-only" id="cards-back" href="#/cards" aria-label="All cards"></a>
+            <div class="page-title">
+              <h1 class="disp" id="cards-title">Cards</h1>
+              <span class="meta" id="cards-meta"></span>
+            </div>
+            <div class="head-buttons">
+              <button type="button" class="btn raised press" id="open-import"></button>
+              <button type="button" class="btn raised press new-card" id="new-card"></button>
+            </div>
+          </header>
+          <div class="cards-cols">
+            <section class="col library scroll" id="library" aria-label="All cards" tabindex="0">
+              <div class="find">
+                <label class="sr" for="find">Find a card</label>
+                <span class="find-icon" id="find-icon"></span>
+                <input id="find" class="sunk inp" placeholder="find a card" autocomplete="off" />
+              </div>
+              <div id="card-groups"></div>
+            </section>
+            <section class="col editor scroll" id="card-editor" aria-label="Card editor" tabindex="0"></section>
+            <section class="col rail scroll" id="card-rail" aria-label="Where this card is used" tabindex="0"></section>
+          </div>
+        </section>
       </main>
     </div>
 
-    <!-- Cards: your cards and persona, with import. -->
-    <dialog class="dialog surface wide" id="cards-dialog">
-      <header class="dialog-header">
-        <h2>Cards</h2>
-        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="dialog-body">
-        <div class="row">
-          <button type="button" class="button primary" id="new-card">New card</button>
-          <button type="button" class="button" id="open-import">Import markdown</button>
-        </div>
-        <ul class="card-list" id="card-list"></ul>
+    <!-- Overlays. Each is a <dialog>: see js/overlay.js. -->
+    <dialog class="ov drawer glass" id="drawer" aria-label="Chats and app"></dialog>
+
+    <dialog class="ov menu raised pop" id="chat-menu" aria-label="Chat" data-align="end">
+      <div role="menu" aria-label="Chat">
+        <button type="button" role="menuitem" class="press" data-go="#/prompts/preview"><span class="mi" id="cm-eye"></span>Preview what gets sent</button>
+        <button type="button" role="menuitem" class="press" data-go="#/prompts"><span class="mi" id="cm-prompts"></span>Prompts page</button>
+        <button type="button" role="menuitem" class="press" data-act="chat-settings"><span class="mi" id="cm-settings"></span>Chat settings</button>
       </div>
     </dialog>
 
-    <!-- One card's fields. -->
-    <dialog class="dialog surface wide" id="card-dialog">
-      <form method="dialog" id="card-form">
-        <header class="dialog-header">
-          <h2 id="card-dialog-title">Card</h2>
-          <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+    <dialog class="ov menu raised pop msg-menu" id="message-menu" aria-label="Message actions">
+      <div class="lifted raised" id="lifted" aria-hidden="true"></div>
+      <div role="menu" aria-label="Message actions" id="message-menu-items"></div>
+    </dialog>
+
+    <dialog class="ov menu raised pop" id="role-menu" aria-label="Role">
+      <div role="menu" aria-label="Role" id="role-menu-items"></div>
+    </dialog>
+
+    <dialog class="ov menu raised pop sheet-on-phone" id="move-menu" aria-label="Move">
+      <div class="menu-head" id="move-head"></div>
+      <div role="menu" aria-labelledby="move-head" id="move-menu-items"></div>
+    </dialog>
+
+    <dialog class="ov cpop raised pop sheet-on-phone" id="colour-picker" aria-labelledby="cp-title"></dialog>
+
+    <dialog class="ov full raised" id="text-editor" aria-labelledby="te-title">
+      <form class="te" id="te-form">
+        <header class="te-head">
+          <button type="button" class="btn ghost press" data-te-cancel>Cancel</button>
+          <div class="te-title"><h2 id="te-title" class="disp"></h2><span class="meta" id="te-sub"></span></div>
+          <button type="submit" class="btn btn-primary press">Save</button>
         </header>
-        <div class="dialog-body">
-          <label class="field">Name <input id="card-name" required maxlength="200" /></label>
-          <label class="check"><input type="checkbox" id="card-persona" /> This is me (my persona: fills <code>{{user}}</code>)</label>
-          <label class="check"><input type="checkbox" id="card-character" /> A character (listed in <code>{{cast}}</code>). Untick for a world, place or faction.</label>
-          <div id="card-fields"></div>
-          <details class="advanced">
-            <summary>Advanced: custom fields</summary>
-            <div id="card-custom-fields"></div>
-            <button type="button" class="button" id="add-custom-field">Add a field</button>
-          </details>
+        <div class="te-name" id="te-name-row" hidden>
+          <label class="sr" for="te-name">Title</label>
+          <input id="te-name" class="sunk inp" autocomplete="off" />
         </div>
-        <footer class="dialog-footer">
-          <button type="button" class="button danger" id="delete-card">Delete card</button>
-          <span class="spacer"></span>
-          <span class="muted small" id="card-tokens"></span>
-          <button type="submit" class="button primary">Save</button>
-        </footer>
+        <label class="sr" for="te-text" id="te-text-label">Text</label>
+        <textarea id="te-text" class="sunk te-text"></textarea>
+        <div class="te-foot">
+          <div class="macbar sunk" id="te-macbar" role="group" aria-label="Insert a macro"></div>
+          <div class="te-meta"><span class="meta" id="te-note"></span><span class="tok sunk" id="te-tok"></span></div>
+        </div>
       </form>
     </dialog>
 
-    <!-- Import cards from markdown. -->
-    <dialog class="dialog surface wide" id="import-dialog">
-      <header class="dialog-header">
-        <h2>Import cards</h2>
-        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="dialog-body">
-        <p class="muted small">
-          Paste one or more cards. Each starts with <code># Name</code>; each <code>## Heading</code> under it is a field.
-          <code>Description</code>, <code>Advanced Description</code> and <code>System Prompt</code> fill the usual fields, and any
-          other heading becomes a custom field.
-        </p>
-        <textarea id="import-text" rows="12" placeholder="# Rumi Kang&#10;## Description&#10;…"></textarea>
-        <label class="file-pick">Or pick a .md file <input type="file" id="import-file" accept=".md,.markdown,.txt,text/markdown,text/plain" /></label>
-        <div id="import-preview"></div>
-      </div>
-      <footer class="dialog-footer">
-        <span class="spacer"></span>
-        <button type="button" class="button primary" id="import-go" disabled>Import</button>
-      </footer>
-    </dialog>
-
-    <!-- The open chat's name and cast. -->
-    <dialog class="dialog surface" id="chat-dialog">
-      <header class="dialog-header">
-        <h2>Chat settings</h2>
-        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="dialog-body">
-        <label class="field">Name <input id="chat-name-input" maxlength="200" /></label>
-        <h3>Cast</h3>
-        <p class="muted small">The cards in this chat. Where each card's blocks go in the prompt is set on the Prompts page.</p>
-        <ol class="cast-list" id="cast-list"></ol>
-        <label class="field">Add a card <select id="cast-add"></select></label>
-      </div>
-      <footer class="dialog-footer">
-        <button type="button" class="button danger" id="delete-chat">Delete chat</button>
-        <span class="spacer"></span>
-      </footer>
-    </dialog>
-
-    <!-- App settings: connections and the main prompt. -->
-    <dialog class="dialog surface wide" id="settings-dialog">
-      <header class="dialog-header">
-        <h2>Settings</h2>
-        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="dialog-body">
-        <h3>Connections</h3>
-        <p class="muted small" id="key-status"></p>
-        <label class="field">Writes replies <select id="rp-profile"></select></label>
-        <div id="profile-list"></div>
-        <button type="button" class="button" id="new-profile">New profile</button>
-
-        <h3>Main prompt</h3>
-        <p class="muted small">The first system block. Macros: <code>{{user}}</code>, <code>{{char}}</code>, <code>{{cast}}</code>, <code>{{date}}</code>, <code>{{time}}</code>, <code>{{// a comment}}</code>.</p>
-        <textarea id="main-prompt" rows="5"></textarea>
-        <div class="row end"><button type="button" class="button" id="reset-main-prompt">Reset</button><button type="button" class="button primary" id="save-main-prompt">Save</button></div>
+    <dialog class="ov dlg raised" id="confirm-dialog" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+      <h2 id="confirm-title" class="disp"></h2>
+      <div id="confirm-body" class="dlg-text"></div>
+      <div class="dlg-buttons">
+        <button type="button" class="btn raised press" data-keep>keep it</button>
+        <button type="button" class="btn btn-danger press" data-confirm><span class="bi" id="confirm-icon"></span><span></span></button>
       </div>
     </dialog>
 
-    <!-- The prompts page: every block of this chat's prompt, in order. -->
-    <dialog class="dialog surface wide tall" id="prompts-dialog">
-      <header class="dialog-header">
-        <h2>Prompts</h2>
-        <span class="muted small" id="prompts-total"></span>
-        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="dialog-body">
-        <p class="muted small">
-          Everything the model gets, top to bottom. Drag blocks (or use the arrows) to reorder. Card fields and the main prompt are
-          linked: editing them here edits the card or the shared main prompt. A block set <em>inside the chat</em> goes that many messages
-          from the end (0 = right after the last message).
-        </p>
-        <div class="block-list" id="block-list"></div>
-      </div>
-      <footer class="dialog-footer">
-        <button type="button" class="button" id="add-block">Add a block</button>
-        <span class="spacer"></span>
-        <button type="button" class="button primary" id="prompts-preview">Preview</button>
-      </footer>
-    </dialog>
+    <dialog class="ov dlg raised wide-dlg" id="chat-dialog" aria-labelledby="chat-dialog-title"></dialog>
+    <dialog class="ov dlg raised wide-dlg" id="settings-dialog" aria-labelledby="settings-title"></dialog>
+    <dialog class="ov dlg raised wide-dlg" id="import-dialog" aria-labelledby="import-title"></dialog>
 
-    <!-- Exactly what the model gets next. -->
-    <dialog class="dialog surface wide" id="preview-dialog">
-      <header class="dialog-header">
-        <h2>Preview</h2>
-        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
-      </header>
-      <div class="dialog-body">
-        <p class="muted small" id="preview-summary"></p>
-        <div class="tabs" role="tablist">
-          <button type="button" class="tab active" data-preview-tab="blocks">Blocks</button>
-          <button type="button" class="tab" data-preview-tab="sent">As sent</button>
-        </div>
-        <div id="preview-body"></div>
-      </div>
-    </dialog>
+    <div class="toast raised" id="toast" role="alert" hidden>
+      <span data-text></span>
+      <button type="button" class="ghost press ib" id="toast-close" aria-label="Dismiss"></button>
+    </div>
   </body>
 </html>

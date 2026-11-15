@@ -5,9 +5,9 @@ smoothly in narrator-style scenes, with turns that leave room to respond.
 The design is in the project's design doc; this README is what works today.
 
 Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
-(the nanoGPT and Vertex AI connection, the login, the look) rather than forked.
+(the nanoGPT and Vertex AI connection, the login) rather than forked.
 
-## What works (steps 1 and 2 of the v1 plan)
+## What works (steps 1 and 2 of the v1 plan, in the lacquer design)
 
 - **Chats**, each with a **cast**: the cards in it, in the order they go into
   the prompt. Reorder them in chat settings.
@@ -46,6 +46,17 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   prompt is really sent, never on Preview.
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
 
+- **The lacquer design**: black lacquer panels over a night-city photo, the
+  same on phone and desktop. In settings, pick the photo (or none), the
+  finish (roiro, tamenuri or shunkei), how much the photo tints the panels,
+  how dim it is and how much it shows through. "Back to readable" puts dim
+  and window back. Each card has a bead colour: violet, blue, pink or any
+  colour from the picker.
+- **The cards page**: every card by kind, its fields in send order (drag the
+  bumps, use the arrow keys, or tap them for move options), where it's used,
+  and what deleting it would take with it. Reordering a card's fields also
+  reorders its folder in every chat.
+
 A new chat's prompt starts as: main prompt, each cast card's fields in cast
 order, then the chat. A card you add to the cast later lands just before the
 chat history.
@@ -66,9 +77,22 @@ Then open <http://127.0.0.1:4950>. (Amaedori uses 4949, so both can run.)
 
 To run it on the Amaedori server, always up: [docs/hosting.md](docs/hosting.md).
 
+## The design
+
+`public/anoesia.css` is the design system from the design handoff, copied
+as is: tokens, glass and lacquer surfaces, beads, buttons, switches. The
+app's own layout is in `public/app.css`. The six background photos are in
+`public/photos`, with their framing and tint in `public/js/theme.js`. The selenite
+theme is designed but not built yet.
+
+Not in this version, though designed: nudges and the agent (steps 3 and 4).
+
 ## Developing
 
 ```sh
 bun test
 bun run typecheck
 ```
+
+To check the pages themselves (accessibility, every control, layout, touch
+size and contrast, at desktop and phone sizes): [scripts/ui-check](scripts/ui-check/README.md).
