@@ -113,12 +113,53 @@ export const MIGRATIONS: string[] = [
   );
   `,
 
-  // 3: card colours (a preset name or a hex), and the last custom one picked.
+  // 3: the agent. Its files, sessions, messages and change log.
+  `
+  CREATE TABLE agent_files (
+    path TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE agent_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE agent_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    turn_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+    content TEXT NOT NULL DEFAULT '',
+    tool_calls TEXT,
+    tool_call_id TEXT,
+    tool_name TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX agent_messages_session ON agent_messages(session_id, seq);
+  CREATE TABLE agent_edits (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    target TEXT NOT NULL,
+    before TEXT,
+    after TEXT,
+    meta TEXT,
+    created_at TEXT NOT NULL,
+    reverted_at TEXT
+  );
+  CREATE INDEX agent_edits_time ON agent_edits(created_at);
+  `,
+  // 4: card colours (a preset name or a hex), and the last custom one picked.
   `
   ALTER TABLE cards ADD COLUMN colour TEXT NOT NULL DEFAULT 'violet';
   ALTER TABLE cards ADD COLUMN custom_colour TEXT NOT NULL DEFAULT '';
   `,
-  // 4: background photos you upload (the files are in the data folder's photos/).
+  // 5: background photos you upload (the files are in the data folder's photos/).
   `
   CREATE TABLE photos (
     id         TEXT PRIMARY KEY,
