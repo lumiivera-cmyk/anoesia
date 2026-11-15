@@ -42,6 +42,7 @@
             <h1 id="chat-name">No chat open</h1>
             <div class="cast-line" id="cast-line"></div>
           </div>
+          <button type="button" class="button" id="open-prompts" title="Every block of this chat's prompt">Prompts</button>
           <button type="button" class="button" id="open-preview" title="See exactly what the model gets next">Preview</button>
           <button type="button" class="icon-button" id="open-chat-settings" title="Chat settings" aria-label="Chat settings">⚙</button>
         </header>
@@ -133,7 +134,7 @@
       <div class="dialog-body">
         <label class="field">Name <input id="chat-name-input" maxlength="200" /></label>
         <h3>Cast</h3>
-        <p class="muted small">The cards in this chat, in the order they go into the prompt. The last one sits closest to the chat.</p>
+        <p class="muted small">The cards in this chat. Where each card's blocks go in the prompt is set on the Prompts page.</p>
         <ol class="cast-list" id="cast-list"></ol>
         <label class="field">Add a card <select id="cast-add"></select></label>
       </div>
@@ -161,6 +162,28 @@
         <textarea id="main-prompt" rows="5"></textarea>
         <div class="row end"><button type="button" class="button" id="reset-main-prompt">Reset</button><button type="button" class="button primary" id="save-main-prompt">Save</button></div>
       </div>
+    </dialog>
+
+    <!-- The prompts page: every block of this chat's prompt, in order. -->
+    <dialog class="dialog surface wide tall" id="prompts-dialog">
+      <header class="dialog-header">
+        <h2>Prompts</h2>
+        <span class="muted small" id="prompts-total"></span>
+        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="dialog-body">
+        <p class="muted small">
+          Everything the model gets, top to bottom. Drag blocks (or use the arrows) to reorder. Card fields and the main prompt are
+          linked: editing them here edits the card or the shared main prompt. A block set <em>inside the chat</em> goes that many messages
+          from the end (0 = right after the last message).
+        </p>
+        <div class="block-list" id="block-list"></div>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="button" id="add-block">Add a block</button>
+        <span class="spacer"></span>
+        <button type="button" class="button primary" id="prompts-preview">Preview</button>
+      </footer>
     </dialog>
 
     <!-- Exactly what the model gets next. -->

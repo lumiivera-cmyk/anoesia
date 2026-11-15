@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_FIELDS, type ParsedCard } from "./cards.ts";
 import { NotFoundError, ValidationError, newId } from "./errors.ts";
 import { DEFAULT_MAIN_PROMPT } from "./prompt.ts";
-import type { Card, CardField, Chat, FieldKey, Message, Profile, ProviderId, ReasoningEffort, Settings } from "./types.ts";
+import type { BlockKind, Card, CardField, Chat, FieldKey, Message, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
 
 const now = () => new Date().toISOString();
 
@@ -267,10 +267,166 @@ export class Store {
   deleteChat(id: string): void {
     this.chat(id);
     this.db.query("DELETE FROM chats WHERE id = ?").run(id);
+    this.db.query("DELETE FROM macro_vars WHERE scope = ?").run(id);
   }
 
   private touch(chatId: string): void {
     this.db.query("UPDATE chats SET updated_at = ? WHERE id = ?").run(now(), chatId);
+  }
+
+  // -------------------------------------------------------- prompt blocks
+
+  /**
+   * A chat's prompt blocks, in order, made up to date first: a new chat
+   * gets the main prompt, each cast card's fields in cast order, and the
+   * chat history; after that, a card added to the cast gets its fields
+   * just before the history, a new field on a card goes after that card's
+   * last block, and a card taken out of the cast loses its blocks.
+   */
+  blocks(chatId: string): PromptBlock[] {
+    const chat = this.chat(chatId);
+    this.db.transaction(() => this.syncBlocks(chat))();
+    const settings = this.settings();
+    const rows = this.db
+      .query(
+        `SELECT b.*, f.title AS field_title, f.content AS field_content
+         FROM prompt_blocks b LEFT JOIN card_fields f ON f.id = b.field_id
+         WHERE b.chat_id = ? ORDER BY b.position`,
+      )
+      .all(chatId) as Row[];
+    return rows.map((r) => toBlock(r, settings.mainPrompt));
+  }
+
+  block(id: string): PromptBlock {
+    const row = this.db.query("SELECT chat_id FROM prompt_blocks WHERE id = ?").get(id) as { chat_id: string } | null;
+    if (!row) throw new NotFoundError("block");
+    return this.blocks(row.chat_id).find((b) => b.id === id)!;
+  }
+
+  private syncBlocks(chat: Chat): void {
+    const rows = () => this.db.query("SELECT id, kind, card_id, field_id FROM prompt_blocks WHERE chat_id = ? ORDER BY position").all(chat.id) as Row[];
+    const insert = this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, card_id, field_id, title, content, role, position) VALUES (?, ?, ?, ?, ?, '', '', 'system', ?)");
+    let blocks = rows();
+    if (blocks.length === 0) {
+      let position = 0;
+      insert.run(newId(), chat.id, "main", null, null, position++);
+      for (const cardId of chat.cast) for (const f of this.card(cardId).fields) insert.run(newId(), chat.id, "field", cardId, f.id, position++);
+      this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, role, position) VALUES (?, ?, 'history', 'user', ?)").run(newId(), chat.id, position);
+      return;
+    }
+    // Cards that left the cast take their blocks with them.
+    const inCast = new Set(chat.cast);
+    for (const b of blocks) if (b.kind === "field" && !inCast.has(b.card_id as string)) this.db.query("DELETE FROM prompt_blocks WHERE id = ?").run(b.id as string);
+    blocks = rows();
+    // The main prompt and the history always exist once.
+    if (!blocks.some((b) => b.kind === "main")) blocks.unshift({ id: newId(), kind: "main", card_id: null, field_id: null, new: true });
+    if (!blocks.some((b) => b.kind === "history")) blocks.push({ id: newId(), kind: "history", card_id: null, field_id: null, new: true });
+    // Fields with no block yet.
+    for (const cardId of chat.cast) {
+      for (const f of this.card(cardId).fields) {
+        if (blocks.some((b) => b.field_id === f.id)) continue;
+        const lastOfCard = blocks.map((b) => b.card_id).lastIndexOf(cardId);
+        const at = lastOfCard >= 0 ? lastOfCard + 1 : blocks.findIndex((b) => b.kind === "history");
+        blocks.splice(at, 0, { id: newId(), kind: "field", card_id: cardId, field_id: f.id, new: true });
+      }
+    }
+    const update = this.db.query("UPDATE prompt_blocks SET position = ? WHERE id = ?");
+    blocks.forEach((b, i) => {
+      if (b.new) {
+        if (b.kind === "history") this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, role, position) VALUES (?, ?, 'history', 'user', ?)").run(b.id as string, chat.id, i);
+        else insert.run(b.id as string, chat.id, b.kind as string, (b.card_id as string | null) ?? null, (b.field_id as string | null) ?? null, i);
+      } else update.run(i, b.id as string);
+    });
+  }
+
+  /** A new text block of the chat's own, just before the chat history. */
+  createBlock(chatId: string, raw: Row): PromptBlock {
+    const blocks = this.blocks(chatId);
+    const at = blocks.findIndex((b) => b.kind === "history");
+    const id = newId();
+    const title = typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 200) : "New block";
+    if (raw.content !== undefined && typeof raw.content !== "string") throw new ValidationError("A block's text must be text.");
+    const role = raw.role === undefined ? "system" : checkRole(raw.role);
+    this.db.transaction(() => {
+      this.db.query("UPDATE prompt_blocks SET position = position + 1 WHERE chat_id = ? AND position >= ?").run(chatId, at);
+      this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, position) VALUES (?, ?, 'text', ?, ?, ?, ?)").run(id, chatId, title, (raw.content as string) ?? "", role, at);
+    })();
+    return this.block(id);
+  }
+
+  /**
+   * Change a block. Its text is its source's: editing a card field's block
+   * edits the card, and the main prompt's edits the main prompt in
+   * settings, shared by every chat.
+   */
+  updateBlock(id: string, raw: Row): PromptBlock {
+    const block = this.block(id);
+    this.db.transaction(() => {
+      if (raw.content !== undefined) {
+        if (typeof raw.content !== "string") throw new ValidationError("A block's text must be text.");
+        if (block.kind === "text") this.db.query("UPDATE prompt_blocks SET content = ? WHERE id = ?").run(raw.content, id);
+        else if (block.kind === "field") {
+          this.db.query("UPDATE card_fields SET content = ? WHERE id = ?").run(raw.content, block.fieldId);
+          this.db.query("UPDATE cards SET updated_at = ? WHERE id = ?").run(now(), block.cardId);
+        } else if (block.kind === "main") this.updateSettings({ mainPrompt: raw.content });
+        else throw new ValidationError("The chat history's text is the chat itself.");
+      }
+      if (raw.title !== undefined) {
+        if (block.kind !== "text") throw new ValidationError("Only your own blocks can be renamed here.");
+        if (typeof raw.title !== "string" || !raw.title.trim()) throw new ValidationError("A block needs a title.");
+        this.db.query("UPDATE prompt_blocks SET title = ? WHERE id = ?").run(raw.title.trim().slice(0, 200), id);
+      }
+      if (raw.role !== undefined) {
+        if (block.kind === "history") throw new ValidationError("The chat history keeps each message's own role.");
+        this.db.query("UPDATE prompt_blocks SET role = ? WHERE id = ?").run(checkRole(raw.role), id);
+      }
+      if (raw.enabled !== undefined) {
+        if (typeof raw.enabled !== "boolean") throw new ValidationError("enabled must be true or false.");
+        if (block.kind === "history" && !raw.enabled) throw new ValidationError("The chat history can't be switched off.");
+        this.db.query("UPDATE prompt_blocks SET enabled = ? WHERE id = ?").run(raw.enabled ? 1 : 0, id);
+      }
+      if (raw.depth !== undefined) {
+        if (block.kind === "history") throw new ValidationError("The chat history can't go inside itself.");
+        const depth = raw.depth === null || raw.depth === "" ? null : Number(raw.depth);
+        if (depth !== null && (!Number.isInteger(depth) || depth < 0 || depth > 999)) throw new ValidationError("Depth is a whole number of messages from the end, 0 to 999.");
+        this.db.query("UPDATE prompt_blocks SET depth = ? WHERE id = ?").run(depth, id);
+      }
+    })();
+    return this.block(id);
+  }
+
+  /** Remove one of the chat's own text blocks. (Card fields leave with their card; the main prompt and history stay.) */
+  deleteBlock(id: string): void {
+    const block = this.block(id);
+    if (block.kind !== "text") throw new ValidationError("Only your own blocks can be deleted. Switch this one off instead.");
+    this.db.query("DELETE FROM prompt_blocks WHERE id = ?").run(id);
+  }
+
+  /** Put a chat's blocks in this order. `ids` must be every block, once. */
+  orderBlocks(chatId: string, ids: unknown): PromptBlock[] {
+    const blocks = this.blocks(chatId);
+    if (!Array.isArray(ids) || ids.length !== blocks.length || new Set(ids).size !== ids.length || !blocks.every((b) => ids.includes(b.id))) {
+      throw new ValidationError("The new order has to list every block once. Reload and try again.");
+    }
+    const update = this.db.query("UPDATE prompt_blocks SET position = ? WHERE id = ?");
+    this.db.transaction(() => (ids as string[]).forEach((id, i) => update.run(i, id)))();
+    return this.blocks(chatId);
+  }
+
+  // ------------------------------------------------------------ variables
+
+  /** Macro variables for a chat id, or `global`. */
+  vars(scope: string): Record<string, string> {
+    const rows = this.db.query("SELECT key, value FROM macro_vars WHERE scope = ?").all(scope) as { key: string; value: string }[];
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+
+  saveVars(scope: string, vars: Record<string, string>): void {
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM macro_vars WHERE scope = ?").run(scope);
+      const insert = this.db.query("INSERT INTO macro_vars (scope, key, value) VALUES (?, ?, ?)");
+      for (const [k, v] of Object.entries(vars)) insert.run(scope, k, v);
+    })();
   }
 
   // ------------------------------------------------------------ messages
@@ -382,6 +538,30 @@ function toMessage(r: Row): Message {
     createdAt: r.created_at as string,
     editedAt: (r.edited_at as string | null) ?? null,
   };
+}
+
+function toBlock(r: Row, mainPrompt: string): PromptBlock {
+  const kind = r.kind as BlockKind;
+  const title = kind === "main" ? "Main prompt" : kind === "history" ? "Chat history" : kind === "field" ? (r.field_title as string) : (r.title as string);
+  const content = kind === "main" ? mainPrompt : kind === "field" ? (r.field_content as string) : kind === "text" ? (r.content as string) : "";
+  return {
+    id: r.id as string,
+    chatId: r.chat_id as string,
+    kind,
+    cardId: (r.card_id as string | null) ?? null,
+    fieldId: (r.field_id as string | null) ?? null,
+    title,
+    content,
+    role: r.role as PromptBlock["role"],
+    enabled: r.enabled === 1,
+    depth: (r.depth as number | null) ?? null,
+    position: r.position as number,
+  };
+}
+
+function checkRole(value: unknown): PromptBlock["role"] {
+  if (value !== "system" && value !== "user" && value !== "assistant") throw new ValidationError("A role is system, user or assistant.");
+  return value;
 }
 
 // ---------------------------------------------------------- validation

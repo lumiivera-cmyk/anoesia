@@ -7,7 +7,7 @@ The design is in the project's design doc; this README is what works today.
 Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 (the nanoGPT and Vertex AI connection, the login, the look) rather than forked.
 
-## What works (step 1 of the v1 plan)
+## What works (steps 1 and 2 of the v1 plan)
 
 - **Chats**, each with a **cast**: the cards in it, in the order they go into
   the prompt. Reorder them in chat settings.
@@ -27,13 +27,28 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 - **Preview**: exactly what the model gets next, block by block (with each
   block's role and source) or as sent.
 - **Connection profiles** on nanoGPT or Google Vertex AI, from Amaedori.
-- **Macros**: `{{user}}`, `{{char}}`, `{{cast}}`, `{{date}}`, `{{time}}`,
-  `{{// comments}}`.
+- **The prompts page**: every block of a chat's prompt, in send order. The
+  main prompt, each card field, your own text blocks, and the chat history
+  are blocks you drag (or move with arrows) into any order, per chat. Each
+  block shows its role (system, user or assistant, changeable), an on/off
+  switch, and a token count, and can go *inside the chat*, a set number of
+  messages from the end. A card's fields fold into one group. Card fields and
+  the main prompt are linked: editing them here edits the card, or the main
+  prompt every chat shares.
+- **Macros**, with Lumiverse's names and syntax so its cards keep working:
+  `{{user}}`, `{{char}}`, `{{cast}}` (or `{{group}}`), `{{lastMessage}}`,
+  `{{lastUserMessage}}`, `{{lastCharMessage}}`, `{{messageCount}}`,
+  `{{date}}`, `{{time}}`, `{{weekday}}`, `{{isodate}}`, `{{isotime}}`,
+  `{{random::a::b}}`, `{{pick::a::b}}`, `{{roll::2d6}}`, chat variables
+  (`{{setvar::k::v}}`, `{{getvar::k}}`, `addvar`, `incvar`, `decvar`,
+  `hasvar`, `deletevar`), global ones (the same with `gvar`), `{{newline}}`,
+  `{{space}}`, `{{noop}}` and `{{// comments}}`. Variables change only when a
+  prompt is really sent, never on Preview.
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
 
-The prompt is assembled in a fixed order for now: main prompt, then each
-cast card, then the chat. The prompts page (step 2) makes that yours to
-arrange.
+A new chat's prompt starts as: main prompt, each cast card's fields in cast
+order, then the chat. A card you add to the cast later lands just before the
+chat history.
 
 ## Running it
 

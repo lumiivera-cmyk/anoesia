@@ -84,6 +84,34 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX messages_chat ON messages(chat_id, seq);
   `,
+
+  // 2: the prompts page. Each chat's prompt is its own list of blocks:
+  // the main prompt (linked to settings), card fields (linked to the field),
+  // its own text blocks, and the chat history. Plus macro variables.
+  `
+  CREATE TABLE prompt_blocks (
+    id       TEXT PRIMARY KEY,
+    chat_id  TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    kind     TEXT NOT NULL CHECK (kind IN ('main', 'text', 'field', 'history')),
+    card_id  TEXT REFERENCES cards(id) ON DELETE CASCADE,
+    field_id TEXT REFERENCES card_fields(id) ON DELETE CASCADE,
+    title    TEXT NOT NULL DEFAULT '',
+    content  TEXT NOT NULL DEFAULT '',    -- only for 'text' blocks; linked blocks read their source
+    role     TEXT NOT NULL DEFAULT 'system' CHECK (role IN ('system', 'user', 'assistant')),
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    depth    INTEGER,                     -- null: where it is; n: inside the chat, n messages from the end
+    position INTEGER NOT NULL
+  );
+  CREATE INDEX prompt_blocks_chat ON prompt_blocks(chat_id, position);
+
+  -- Macro variables: scope is a chat id, or 'global'.
+  CREATE TABLE macro_vars (
+    scope TEXT NOT NULL,
+    key   TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (scope, key)
+  );
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

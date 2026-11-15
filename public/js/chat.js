@@ -67,6 +67,7 @@ export function renderChat() {
   const names = (chat?.cast ?? []).map((id) => cardById(id)).filter(Boolean).map((c) => (c.isPersona ? `${c.name} (you)` : c.name));
   $("cast-line").textContent = chat ? (names.length ? names.join(" · ") : "No cast yet: add cards in chat settings") : "";
   $("open-preview").disabled = !chat;
+  $("open-prompts").disabled = !chat;
   $("open-chat-settings").disabled = !chat;
   $("send").disabled = !chat || state.busy;
   $("stop").hidden = !state.busy;
@@ -210,8 +211,6 @@ function renderCast() {
         if (!c) return "";
         const tag = c.isPersona ? `<span class="tag">you</span>` : c.isCharacter ? "" : `<span class="tag">world</span>`;
         return `<li data-i="${i}"><span class="name">${escapeHtml(c.name)}</span>${tag}
-          <button type="button" class="icon-button" data-move="-1" title="Earlier" ${i === 0 ? "disabled" : ""}>↑</button>
-          <button type="button" class="icon-button" data-move="1" title="Later" ${i === cast.length - 1 ? "disabled" : ""}>↓</button>
           <button type="button" class="icon-button" data-remove title="Remove from cast">✕</button></li>`;
       })
       .join("") || `<li class="muted small">No cards in this chat yet.</li>`;
@@ -271,12 +270,6 @@ export function wireChat() {
     if (!li) return;
     const i = Number(li.dataset.i);
     const cast = [...state.chat.cast];
-    const move = e.target.closest("[data-move]");
-    if (move) {
-      const j = i + Number(move.dataset.move);
-      [cast[i], cast[j]] = [cast[j], cast[i]];
-      return saveCast(cast);
-    }
     if (e.target.closest("[data-remove]")) {
       cast.splice(i, 1);
       return saveCast(cast);

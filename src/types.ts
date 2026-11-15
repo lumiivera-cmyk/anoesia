@@ -103,3 +103,25 @@ export interface Settings {
   /** The main prompt: the first system block, with macros. */
   mainPrompt: string;
 }
+
+/** What a prompt block is. */
+export type BlockKind = "main" | "text" | "field" | "history";
+
+/** One block on a chat's prompts page. */
+export interface PromptBlock {
+  id: string;
+  chatId: string;
+  kind: BlockKind;
+  /** For a field block: the card and the field it shows. */
+  cardId: string | null;
+  fieldId: string | null;
+  /** A text block's own title; for linked blocks, the source's ("Description", "Main prompt"). */
+  title: string;
+  /** The text, read from its source for linked blocks. "" for the history block. */
+  content: string;
+  role: ChatMessage["role"];
+  enabled: boolean;
+  /** null: in its place in the list. A number: inside the chat history, that many messages from the end (0 = after the last). */
+  depth: number | null;
+  position: number;
+}

@@ -39,8 +39,7 @@ export function createApp(config: Config): App {
     const profile = store.profile(settings.rpProfileId);
     if (!profile.model) throw new ValidationError(`The profile "${profile.name}" has no model yet.`);
     if (running.has(chatId)) throw new ValidationError("A reply is already being written in this chat.");
-    const chat = store.chat(chatId);
-    const prompt = assemblePrompt({ mainPrompt: settings.mainPrompt, cast: chat.cast.map((id) => store.card(id)), messages: history ?? store.messages(chatId) });
+    const prompt = buildPrompt(chatId, history);
     const controller = new AbortController();
     running.set(chatId, controller);
     try {
@@ -58,10 +57,20 @@ export function createApp(config: Config): App {
       });
       const content = cleanReply(result.content);
       if (!content) throw new ApiError("The model returned an empty reply.");
+      // The prompt was really sent: keep what its macros did to the variables.
+      store.saveVars(chatId, prompt.vars);
+      store.saveVars("global", prompt.globals);
       return { content, profileId: profile.id, model: result.model };
     } finally {
       running.delete(chatId);
     }
+  }
+
+  /** A chat's prompt as it would be sent now, from its blocks (or from `history` in place of its messages). */
+  function buildPrompt(chatId: string, history?: Message[]) {
+    const blocks = store.blocks(chatId);
+    const cards = new Map(store.cards().map((c) => [c.id, c]));
+    return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), vars: store.vars(chatId), globals: store.vars("global") });
   }
 
   function chatView(chatId: string) {
@@ -124,8 +133,17 @@ export function createApp(config: Config): App {
       if (method === "DELETE") return (store.deleteChat(p[0]!), json({ ok: true }));
     }
     if ((p = m("/api/chats/:id/preview")) && method === "GET") {
-      const chat = store.chat(p[0]!);
-      return json(assemblePrompt({ mainPrompt: store.settings().mainPrompt, cast: chat.cast.map((id) => store.card(id)), messages: store.messages(chat.id) }));
+      return json(buildPrompt(p[0]!));
+    }
+    // The prompts page: a chat's blocks.
+    if ((p = m("/api/chats/:id/blocks"))) {
+      if (method === "GET") return json(store.blocks(p[0]!));
+      if (method === "POST") return json(store.createBlock(p[0]!, await body()));
+      if (method === "PUT") return json(store.orderBlocks(p[0]!, (await body()).ids));
+    }
+    if ((p = m("/api/blocks/:id"))) {
+      if (method === "PATCH") return json(store.updateBlock(p[0]!, await body()));
+      if (method === "DELETE") return (store.deleteBlock(p[0]!), json({ ok: true }));
     }
     // Send: save your message (if any), then write the reply.
     if ((p = m("/api/chats/:id/send")) && method === "POST") {

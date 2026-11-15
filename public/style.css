@@ -713,6 +713,165 @@ textarea {
   overflow-y: auto;
 }
 
+/* =========================================================== prompts page */
+
+.dialog.tall {
+  height: calc(100dvh - 2rem);
+}
+
+.block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.card-group,
+.pblock {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--app-background);
+}
+
+.card-group {
+  background: var(--sidebar-bg);
+}
+
+.group-head,
+.pblock-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  flex-wrap: wrap;
+  min-height: 2.5rem;
+}
+
+.group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0 0.4rem 0.4rem 1.4rem;
+}
+
+.handle {
+  cursor: grab;
+  color: var(--text-muted);
+  padding: 0 0.2rem;
+  user-select: none;
+}
+
+.group-toggle,
+.pblock-title {
+  border: none;
+  background: none;
+  color: var(--text-strong);
+  cursor: pointer;
+  text-align: left;
+  padding: 0.2rem 0.1rem;
+}
+
+.pblock-title:disabled {
+  cursor: default;
+}
+
+.source {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.pblock.kind-history {
+  border-style: dashed;
+  background: var(--sidebar-footer-bg);
+}
+
+.pblock.off .pblock-title,
+.pblock.is-empty .pblock-title {
+  opacity: 0.55;
+}
+
+.pblock.off {
+  border-style: dotted;
+}
+
+.role-select {
+  width: auto !important;
+  padding: 0.15em 0.3em !important;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.depth {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.depth select {
+  width: auto !important;
+  padding: 0.15em 0.3em !important;
+  font-size: 0.8rem;
+}
+
+.depth input {
+  width: 4em !important;
+  padding: 0.15em 0.3em !important;
+  font-size: 0.8rem;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.controls,
+.moves {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.moves {
+  gap: 0;
+}
+
+.tokens {
+  min-width: 3em;
+  text-align: right;
+}
+
+.block-editor {
+  padding: 0 0.6rem 0.5rem;
+}
+
+.block-editor textarea {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.block-title-input {
+  margin-bottom: 0.4rem;
+}
+
+.dragging {
+  opacity: 0.4;
+}
+
+.drop-before {
+  box-shadow: 0 -3px 0 var(--accent);
+}
+
+.drop-after {
+  box-shadow: 0 3px 0 var(--accent);
+}
+
 /* ================================================================= phone */
 
 @media (max-width: 760px) {
@@ -737,8 +896,17 @@ textarea {
     opacity: 1;
   }
 
+  .group-body {
+    padding-left: 0.4rem;
+  }
+
+  .moves {
+    flex-wrap: nowrap;
+  }
+
   .dialog,
-  .dialog.wide {
+  .dialog.wide,
+  .dialog.tall {
     width: 100vw;
     max-width: 100vw;
     height: 100dvh;
