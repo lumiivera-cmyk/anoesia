@@ -1,0 +1,10 @@
+# Dependencies (reinstall with `bun install`)
+node_modules/
+
+# Your chats, cards and settings. Personal data, so never in git.
+data/
+
+# Secrets: your nanoGPT API key lives here.
+.env
+# A Google Cloud service account key, for Vertex AI.
+gcp-key.json
