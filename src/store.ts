@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: Settings = {
   rpProfileId: "",
   mainPrompt: DEFAULT_MAIN_PROMPT,
   background: DEFAULT_BACKGROUND,
+  agentProfileId: "",
 };
 
 export const PHOTO_TYPES: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
@@ -72,6 +73,7 @@ export class Store {
     // A photo that's gone (or one of the old built-in names) shows as none.
     if (out.background.photo !== "none" && !this.findPhoto(out.background.photo)) out.background.photo = "none";
     if (out.rpProfileId && !this.findProfile(out.rpProfileId)) out.rpProfileId = "";
+    if (out.agentProfileId && !this.findProfile(out.agentProfileId)) out.agentProfileId = "";
     return out;
   }
 
@@ -81,6 +83,11 @@ export class Store {
       if (typeof raw.rpProfileId !== "string") throw new ValidationError("rpProfileId must be text");
       if (raw.rpProfileId && !this.findProfile(raw.rpProfileId)) throw new NotFoundError("profile");
       clean.rpProfileId = raw.rpProfileId;
+    }
+    if (raw.agentProfileId !== undefined) {
+      if (typeof raw.agentProfileId !== "string") throw new ValidationError("agentProfileId must be text");
+      if (raw.agentProfileId && !this.findProfile(raw.agentProfileId)) throw new NotFoundError("profile");
+      clean.agentProfileId = raw.agentProfileId;
     }
     if (raw.mainPrompt !== undefined) {
       if (typeof raw.mainPrompt !== "string") throw new ValidationError("The main prompt must be text.");
