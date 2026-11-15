@@ -22,7 +22,7 @@
  * This file uses the built-in `fetch`, so there is no SDK to install.
  */
 
-import type { ApiMessage, ProviderId, ReasoningEffort } from "./types.ts";
+import type { AgentApiMessage, ApiMessage, ProviderId, ReasoningEffort } from "./types.ts";
 import { isGeminiModel, scrubVertex, vertexModel, vertexToken, type VertexOptions } from "./vertex.ts";
 
 /** What the client needs to know to reach the API. */
@@ -89,7 +89,7 @@ export type VisionMessage = { role: "user"; content: ({ type: "text"; text: stri
 
 export interface CompletionRequest {
   model: string;
-  messages: (ApiMessage | VisionMessage)[];
+  messages: (ApiMessage | VisionMessage | AgentApiMessage)[];
   temperature: number;
   maxTokens: number;
   /** Nucleus sampling. Left out of the request when not set. */
