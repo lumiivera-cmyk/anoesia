@@ -49,7 +49,9 @@
               <a class="raised press ib" id="go-preview" href="#/prompts/preview" aria-label="Preview what gets sent" title="Preview"></a>
               <a class="raised press ib" id="go-prompts" href="#/prompts" aria-label="Prompts page" title="Prompts"></a>
               <button type="button" class="raised press ib" id="open-chat-settings" aria-label="Chat settings" title="Chat settings"></button>
+              <button type="button" class="btn raised press" id="open-agent" title="Open the agent">Agent</button>
             </div>
+            <button type="button" class="ghost press ib phone-only" id="open-agent-phone" aria-label="Open the agent" title="Agent">A</button>
             <button type="button" class="ghost press ib phone-only" id="open-chat-menu" aria-label="Preview, prompts and chat settings"></button>
           </header>
 
@@ -142,6 +144,30 @@
         </section>
       </main>
     </div>
+
+
+    <aside class="agent-panel glass" id="agent-panel" hidden aria-label="Agent">
+      <header class="agent-header">
+        <select id="agent-session" aria-label="Session"></select>
+        <button type="button" class="btn raised press" id="agent-new">New</button>
+        <button type="button" class="ghost press ib" id="agent-close" aria-label="Close the agent">✕</button>
+      </header>
+      <div class="seg sunk agent-tabs" role="tablist" aria-label="Agent views">
+        <button type="button" class="tab active" data-agent-tab="chat">Chat</button>
+        <button type="button" class="tab" data-agent-tab="changes">Changes</button>
+        <button type="button" class="tab" data-agent-tab="files">Files</button>
+      </div>
+      <section class="agent-chat" id="agent-chat">
+        <div class="agent-log scroll" id="agent-log" aria-live="polite"></div>
+        <div class="agent-error" id="agent-error" role="alert" hidden></div>
+        <form class="agent-composer" id="agent-form">
+          <textarea id="agent-input" rows="3" placeholder="Ask the agent…" aria-label="Message to the agent"></textarea>
+          <div class="row end"><button type="button" class="btn raised press" id="agent-stop" hidden>Stop</button><button type="submit" class="btn btn-primary press" id="agent-send">Send</button></div>
+        </form>
+      </section>
+      <section class="agent-scroll scroll" id="agent-changes" hidden></section>
+      <section class="agent-scroll scroll" id="agent-files" hidden></section>
+    </aside>
 
     <!-- Overlays. Each is a <dialog>: see js/overlay.js. -->
     <dialog class="ov drawer glass" id="drawer" aria-label="Chats and app"></dialog>
