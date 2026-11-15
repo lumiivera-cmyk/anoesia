@@ -102,6 +102,8 @@ export interface Settings {
   rpProfileId: string;
   /** The main prompt: the first system block, with macros. */
   mainPrompt: string;
+  /** The profile the agent thinks with ("" until you pick one). */
+  agentProfileId: string;
 }
 
 /** What a prompt block is. */
@@ -124,4 +126,65 @@ export interface PromptBlock {
   /** null: in its place in the list. A number: inside the chat history, that many messages from the end (0 = after the last). */
   depth: number | null;
   position: number;
+}
+
+// ------------------------------------------------------------------ agent
+
+/** A tool call as the API writes it inside an assistant message. */
+export interface ApiToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+  /** Provider metadata replayed as it came (Gemini thought signatures). */
+  extra_content?: Record<string, unknown>;
+}
+
+/** A message in an agent conversation, as sent to the API. */
+export type AgentApiMessage =
+  | ChatMessage
+  | { role: "assistant"; content: string | null; tool_calls: ApiToolCall[] }
+  | { role: "tool"; content: string; tool_call_id: string };
+
+/** A conversation with the agent. Its messages are kept, so you can go back to one. */
+export interface AgentSession {
+  id: string;
+  title: string;
+  /** The chat that was open when you last wrote to it, or null. */
+  chatId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One message in an agent session. */
+export interface AgentMessage {
+  id: string;
+  sessionId: string;
+  /** The turn it belongs to: your message and everything the agent did in reply. */
+  turnId: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  /** For an assistant message that called tools. */
+  toolCalls: ApiToolCall[] | null;
+  /** For a tool result: which call, and its tool. */
+  toolCallId: string | null;
+  toolName: string | null;
+  createdAt: string;
+}
+
+/** One change the agent made, kept so it can be shown as a diff and undone. */
+export interface AgentEdit {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  /** What changed, in the agent's paths, e.g. `cards/Rumi Kang/Description`. */
+  path: string;
+  /** Where it lives, e.g. `field:<id>`, `main`, `block:<id>`, `message:<id>`, `file:<path>`. */
+  target: string;
+  /** The text before (null: it didn't exist) and after (null: deleted). */
+  before: string | null;
+  after: string | null;
+  /** What's needed to put back something deleted or remove something created (JSON). */
+  meta: Record<string, unknown> | null;
+  createdAt: string;
+  revertedAt: string | null;
 }

@@ -21,6 +21,7 @@ function renderSettings() {
   $("rp-profile").innerHTML = state.profiles.length
     ? state.profiles.map((p) => `<option value="${p.id}" ${p.id === state.settings.rpProfileId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")
     : `<option value="">Make a profile first</option>`;
+  renderAgentPicker();
   $("profile-list").innerHTML = state.profiles.map(profileHtml).join("");
   $("main-prompt").value = state.settings.mainPrompt;
 }
@@ -88,6 +89,14 @@ async function saveProfileField(event) {
 
 function renderRpPicker() {
   $("rp-profile").innerHTML = state.profiles.map((p) => `<option value="${p.id}" ${p.id === state.settings.rpProfileId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
+  renderAgentPicker();
+}
+
+/** The agent's profile: its own, so it can be a different (tool-calling) model from the one that writes replies. */
+function renderAgentPicker() {
+  $("agent-profile").innerHTML =
+    `<option value="">None yet</option>` +
+    state.profiles.map((p) => `<option value="${p.id}" ${p.id === state.settings.agentProfileId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("");
 }
 
 // -------------------------------------------------------------- preview
@@ -124,6 +133,10 @@ export function wireSettings() {
     });
   $("rp-profile").addEventListener("change", async (e) => {
     const settings = await attempt(() => api("PATCH", "/api/settings", { rpProfileId: e.target.value }));
+    if (settings) state.settings = settings;
+  });
+  $("agent-profile").addEventListener("change", async (e) => {
+    const settings = await attempt(() => api("PATCH", "/api/settings", { agentProfileId: e.target.value }));
     if (settings) state.settings = settings;
   });
   $("new-profile").addEventListener("click", async () => {

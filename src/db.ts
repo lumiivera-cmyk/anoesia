@@ -112,6 +112,53 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (scope, key)
   );
   `,
+
+  // 3: the agent. Its own files (notes, personality, a folder per chat),
+  // its sessions and their messages, and the log of every change it makes.
+  `
+  CREATE TABLE agent_files (
+    path       TEXT PRIMARY KEY,           -- e.g. 'index.md', 'notes/rumi-draft.md', 'chats/<chat id>/notebook.md'
+    content    TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE agent_sessions (
+    id         TEXT PRIMARY KEY,
+    title      TEXT NOT NULL,
+    chat_id    TEXT REFERENCES chats(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE agent_messages (
+    id           TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    seq          INTEGER NOT NULL,
+    turn_id      TEXT NOT NULL,
+    role         TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+    content      TEXT NOT NULL DEFAULT '',
+    tool_calls   TEXT,                     -- JSON, for an assistant message that called tools
+    tool_call_id TEXT,
+    tool_name    TEXT,
+    created_at   TEXT NOT NULL
+  );
+  CREATE INDEX agent_messages_session ON agent_messages(session_id, seq);
+
+  -- Kept when a session is deleted: the changes happened all the same.
+  CREATE TABLE agent_edits (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL,
+    turn_id     TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    before      TEXT,
+    after       TEXT,
+    meta        TEXT,
+    created_at  TEXT NOT NULL,
+    reverted_at TEXT
+  );
+  CREATE INDEX agent_edits_time ON agent_edits(created_at);
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

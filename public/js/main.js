@@ -7,12 +7,14 @@ import { openChat, renderChatList, wireChat } from "./chat.js";
 import { wireCards } from "./cards.js";
 import { wireSettings } from "./settings.js";
 import { wirePrompts } from "./prompts.js";
+import { wireAgent } from "./agent.js";
 
 async function start() {
   wireChat();
   wireCards();
   wireSettings();
   wirePrompts();
+  wireAgent();
   try {
     await loadState();
   } catch (error) {
