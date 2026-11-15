@@ -12,6 +12,7 @@ import { showPrompts, wirePrompts } from "./prompts.js";
 import { showCards, wireCards } from "./cards.js";
 import { wireSettings } from "./settings.js";
 import { wireTextEditor } from "./editor.js";
+import { wireAgent } from "./agent.js";
 
 // ------------------------------------------------------------------ router
 
@@ -52,6 +53,7 @@ async function start() {
   wireCards();
   wireSettings();
   wireTextEditor();
+  wireAgent();
   $("confirm-icon").innerHTML = icon.trash(16);
   for (const h of document.querySelectorAll("h1")) h.tabIndex = -1;
   try {
