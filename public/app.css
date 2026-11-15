@@ -512,3 +512,32 @@ select option{background:#15131C;color:var(--ink-1)}
 .profile .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 /* the toast */
 .toast{position:fixed;z-index:20;left:50%;bottom:max(20px,env(safe-area-inset-bottom));translate:-50% 0;max-width:min(560px,calc(100vw - 24px));box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:6px 6px 6px 16px;border-radius:16px;font-size:var(--fs-sm);line-height:20px;color:var(--danger-ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 0 1.5px rgba(255,90,140,.45),0 18px 40px rgba(0,0,0,.7)}
+
+
+/* Agent panel: a slide-over companion that keeps the lacquer app visible beneath it. */
+.agent-panel{position:fixed;z-index:30;inset:0 0 0 auto;width:min(420px,100vw);box-sizing:border-box;display:flex;flex-direction:column;min-height:0;padding:14px;background:var(--ground);border-left:1px solid rgba(255,255,255,.14);box-shadow:-18px 0 50px rgba(0,0,0,.55)}
+.agent-header{display:flex;align-items:center;gap:8px;min-height:48px}
+.agent-header select{flex:1;min-width:0;background:var(--sunk-bg);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px}
+.agent-tabs{display:flex;gap:4px;padding:4px;margin:10px 0}
+.agent-tabs button{flex:1;min-height:38px;border:0;border-radius:8px;background:transparent;color:var(--ink-3)}
+.agent-tabs button.active{background:var(--seg-on);color:var(--ink-1)}
+.agent-chat{display:flex;flex:1;flex-direction:column;min-height:0}
+.agent-log,.agent-scroll{flex:1;min-height:0;overflow:auto;padding:8px}
+.agent-msg{margin:10px 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink-2)}
+.agent-msg.user{margin-left:28px;padding:10px 12px;border-radius:12px;background:var(--raised-bg)}
+.agent-tool{font-size:var(--fs-xs);color:var(--ink-4);margin:4px 0}
+.agent-tool summary{cursor:pointer;overflow-wrap:anywhere}
+.agent-tool pre,.agent-diff{margin:5px 0;padding:9px;background:var(--sunk-bg);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:18em;overflow:auto}
+.agent-diff ins{background:rgba(80,190,150,.22);color:#9fe0d0;text-decoration:none}
+.agent-diff del{background:rgba(220,70,90,.2);color:#ffb0b8}
+.agent-turn-edits{border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:8px;margin:10px 0}
+.agent-edit{margin:8px 0}.agent-edit.reverted .agent-diff{opacity:.45}
+.agent-edit-head{display:flex;align-items:center;gap:8px;overflow-wrap:anywhere}
+.agent-composer{border-top:1px solid rgba(255,255,255,.12);padding-top:10px;display:grid;gap:8px}
+.agent-composer textarea,#agent-file-text{width:100%;box-sizing:border-box;min-height:90px;padding:10px;border-radius:10px;background:var(--sunk-bg);color:var(--ink-1);border:1px solid rgba(255,255,255,.14);font:inherit}
+.agent-composer .row{display:flex;justify-content:flex-end;gap:8px}
+.agent-file-list{padding-left:20px}.agent-file-list li{margin:8px 0}
+.agent-ask{border-left:3px solid var(--violet);padding:4px 0 4px 10px;margin:10px 0}
+.agent-options{display:grid;gap:6px}.agent-option{display:flex;flex-direction:column;text-align:left}
+.agent-error{padding:8px;color:var(--danger-ink)}
+@media(max-width:899px){.agent-panel{width:100vw;padding:12px}}
