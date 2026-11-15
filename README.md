@@ -7,7 +7,7 @@ The design is in the project's design doc; this README is what works today.
 Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 (the nanoGPT and Vertex AI connection, the login, the look) rather than forked.
 
-## What works (steps 1 and 2 of the v1 plan)
+## What works (steps 1 to 3a of the v1 plan)
 
 - **Chats**, each with a **cast**: the cards in it, in the order they go into
   the prompt. Reorder them in chat settings.
@@ -44,6 +44,20 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   `hasvar`, `deletevar`), global ones (the same with `gvar`), `{{newline}}`,
   `{{space}}`, `{{noop}}` and `{{// comments}}`. Variables change only when a
   prompt is really sent, never on Preview.
+- **The agent** (the Agent button), modelled on LumiAgent. It has its own
+  profile (Settings → "The agent thinks with"), so it can be a tool-calling
+  model while another writes replies. It sees Anoesia as paths:
+  `cards/<card>/<field>`, `prompt/main`, `chats/<chat>/messages/<n>`,
+  `chats/<chat>/blocks/<block>`, and its own files under `agent/`
+  (`index.md`, read at the start of every session; `personality.md`;
+  `notes/` for drafts; `chats/<chat>/` for each chat). Its tools: list, read,
+  grep, edit (find and replace), write, delete, preview the prompt, fill
+  macros, count tokens, ask you a question with choices, remember a note, and
+  list or revert its changes. It changes your things only when you ask.
+  Every change is logged with its text before and after, shown as a diff
+  under the turn that made it, and can be reverted one at a time or a whole
+  turn at once (combing a chat is one turn). A revert never silently undoes
+  something you changed after the agent did. Sessions are kept.
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
 
 A new chat's prompt starts as: main prompt, each cast card's fields in cast
