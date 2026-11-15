@@ -3,7 +3,7 @@
  * under `/api/`. Start it with `bun start`.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { parseCards } from "./cards.ts";
 import { loadConfig, type Config } from "./config.ts";
@@ -11,12 +11,13 @@ import { openDatabase } from "./db.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
 import { addressOf, cookieFor, isPublicPath, Login, overHttps, tokenOf } from "./login.ts";
 import { ApiError, CancelledError, createChatCompletion, listModels, type ApiOptions } from "./nanogpt.ts";
+import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { runTurn } from "./agent.ts";
 import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
 import { ConflictError, Workspace } from "./workspace.ts";
-import { Store } from "./store.ts";
+import { PHOTO_TYPES, Store } from "./store.ts";
 import type { AgentEdit, Message, ProviderId } from "./types.ts";
 
 export interface App {
@@ -34,9 +35,10 @@ export function createApp(config: Config): App {
   const store = new Store(db);
   const agent = new AgentStore(db);
   const ws = new Workspace(store, agent);
-  /** The agent turn running in each session, so Stop can end it. */
   const agentRunning = new Map<string, AbortController>();
   const login = new Login(config.dataDir);
+  const photoDir = join(config.dataDir, "photos");
+  mkdirSync(photoDir, { recursive: true });
   const api: ApiOptions = { apiKey: config.apiKey, baseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs, vertex: config.vertex };
   /** The reply being written in each chat, so Stop can end it and a second one can't start. */
   const running = new Map<string, AbortController>();
@@ -82,7 +84,6 @@ export function createApp(config: Config): App {
     return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), vars: store.vars(chatId), globals: store.vars("global") });
   }
 
-  /** A change as the panel shows it: with its diff, and its path as it reads now. */
   function editView(e: AgentEdit) {
     const path = e.target.startsWith("file:") ? ws.displayFilePath(e.target.slice(5)) : e.path;
     return { ...e, path, diff: compactDiff(diff(e.before ?? "", e.after ?? "")) };
@@ -119,7 +120,24 @@ export function createApp(config: Config): App {
     let p: string[] | undefined;
 
     if (path === "/api/state" && method === "GET") {
-      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey) });
+      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey), macros: KNOWN_MACROS, photos: store.photos() });
+    }
+
+    // Background photos: the image itself as the body, its name, tint and framing in the query.
+    if (path === "/api/photos" && method === "POST") {
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.length > MAX_PHOTO_BYTES) throw new ValidationError("That photo is over 15 MB. Try a smaller one.");
+      const ext = imageType(bytes);
+      if (!ext) throw new ValidationError("That isn't a JPEG, PNG or WebP image.");
+      const q = url.searchParams;
+      const photo = store.addPhoto({ name: q.get("name"), ext, tint: q.get("tint"), position: q.get("position") });
+      await Bun.write(join(photoDir, `${photo.id}.${ext}`), bytes);
+      return json(photo);
+    }
+    if ((p = m("/api/photos/:id")) && method === "DELETE") {
+      const { ext } = store.deletePhoto(p[0]!);
+      rmSync(join(photoDir, `${p[0]}.${ext}`), { force: true });
+      return json({ ok: true, settings: store.settings() });
     }
     if (path === "/api/settings" && method === "PATCH") return json(store.updateSettings(await body()));
 
@@ -204,7 +222,7 @@ export function createApp(config: Config): App {
       return json({ ok: true });
     }
 
-    // The agent
+    // The agent: its sessions, messages, tools, files and reversible change log.
     if (path === "/api/agent" && method === "GET") return json({ sessions: agent.sessions(), files: filesView() });
     if (path === "/api/agent/sessions" && method === "POST") return json(agent.createSession(await body()));
     if ((p = m("/api/agent/sessions/:id"))) {
@@ -233,9 +251,7 @@ export function createApp(config: Config): App {
       agentRunning.get(p[0]!)?.abort();
       return json({ ok: true });
     }
-    if (path === "/api/agent/edits" && method === "GET") {
-      return json(agent.edits({ limit: Number(url.searchParams.get("limit")) || 200 }).map(editView));
-    }
+    if (path === "/api/agent/edits" && method === "GET") return json(agent.edits({ limit: Number(url.searchParams.get("limit")) || 200 }).map(editView));
     if ((p = m("/api/agent/edits/:id/revert")) && method === "POST") return json(editView(ws.revert(p[0]!, (await body()).force === true)));
     if ((p = m("/api/agent/turns/:id/revert")) && method === "POST") return json(ws.revertTurn(p[0]!, (await body()).force === true).map(editView));
     if (path === "/api/agent/files") {
@@ -319,6 +335,12 @@ export function createApp(config: Config): App {
       const gate = await loginGate(request, url);
       if (gate) return gate;
       if (url.pathname.startsWith("/api/")) return await route(request, url);
+      const media = /^\/media\/([\w-]+)\.(jpg|png|webp)$/.exec(url.pathname);
+      if (media) {
+        const file = Bun.file(join(photoDir, `${media[1]}.${media[2]}`));
+        if (!(await file.exists())) throw new NotFoundError("photo");
+        return new Response(file, { headers: { "Content-Type": PHOTO_TYPES[media[2]!]!, "Cache-Control": "private, max-age=31536000, immutable" } });
+      }
       return await staticFile(config.publicDir, url.pathname);
     } catch (error) {
       const status = error instanceof NotFoundError ? 404 : error instanceof ConflictError ? 409 : error instanceof ValidationError ? 400 : error instanceof ApiError ? 502 : 500;
@@ -332,8 +354,18 @@ export function createApp(config: Config): App {
 
 function errorMessage(error: unknown): string {
   if (error instanceof CancelledError) return "Stopped.";
-  if (error instanceof NotFoundError || error instanceof ValidationError || error instanceof ApiError) return error.message;
+  if (error instanceof NotFoundError || error instanceof ConflictError || error instanceof ValidationError || error instanceof ApiError) return error.message;
   return "Something went wrong on the server. The details are in the server's log.";
+}
+
+const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+
+/** A photo's type from its first bytes, not from what the browser says it is. */
+function imageType(b: Uint8Array): "jpg" | "png" | "webp" | null {
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpg";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "png";
+  if (String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP") return "webp";
+  return null;
 }
 
 function json(value: unknown, status = 200): Response {
