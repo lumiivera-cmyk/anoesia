@@ -189,7 +189,12 @@ async function addPhoto(file) {
 
 export function wireSettings() {
   const d = $("settings-dialog");
-  d.addEventListener("change", (e) => {
+  d.addEventListener("change", async (e) => {
+    if (e.target.id === "agent-profile") {
+      const settings = await attempt(() => api("PATCH", "/api/settings", { agentProfileId: e.target.value }));
+      if (settings) state.settings = settings;
+      return;
+    }
     if (e.target.id !== "photo-file" || !e.target.files?.[0]) return;
     addPhoto(e.target.files[0]);
     e.target.value = "";
