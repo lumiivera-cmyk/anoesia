@@ -1,0 +1,323 @@
+/* =====================================================================================
+   Anoesia: shared stylesheet
+   One look, two materials. Every board (and the app) loads this file and sets ONE theme
+   class on its root: .theme-lacquer or .theme-selenite. Components use the same class
+   names in both; only the theme decides what "raised", "sunk", a switch or a gem
+   looks like.
+
+   Layers:  1 tokens  ·  2 themes  ·  3 base  ·  4 text  ·  5 materials  ·  6 controls
+            7 chat  ·  8 prompts page  ·  9 overlays  ·  10 selenite plate machinery
+   Components are written once and read theme variables (--raised-bg, --sunk-shadow ...);
+   a theme is a set of those variables. Only gems are built differently per theme, so those
+   few rules are theme-scoped; section 10 exists only in selenite.
+   Desktop and phone share every rule; where touch needs more room, a (pointer:coarse)
+   query says so.
+   State lives in attributes, not in style strings:
+     .switch[aria-checked=true], .seg [aria-selected=true], .role-system|user|assistant,
+     .raised.is-on, [aria-disabled=true]
+   ===================================================================================== */
+
+/* 1 · TOKENS ------------------------------------------------------------------------- */
+:root{
+  --font:'Atkinson Hyperlegible',system-ui,sans-serif;
+
+  /* type scale: 7 steps (was 18 sizes in half-pixel steps) */
+  --fs-2xs:11.5px;   /* tags, tiny counts */
+  --fs-xs:12.5px;    /* meta, sources, timestamps, eyebrows */
+  --fs-sm:14px;      /* buttons, UI text, agent prose */
+  --fs-md:15.5px;    /* row and block titles, inputs */
+  --fs-lg:17px;      /* story prose, panel titles */
+  --fs-xl:19px;      /* page and chat titles */
+  --fs-2xl:24px;     /* wordmark, display */
+  --lh-ui:1.4;
+  --lh-prose:1.68;
+
+  /* spacing (4px grid) */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;
+
+  /* radii */
+  --r-xs:6px;--r-sm:9px;--r-md:12px;--r-lg:16px;--r-xl:20px;--r-sheet:26px;--r-pill:999px;
+
+  /* touch: every phone target is at least this, visible or not */
+  --hit:44px;
+
+  /* accents (shared by both materials) */
+  --violet:#A86CFF;  --violet-ink:#D3BBFF;  --on-violet:#22084A;
+  --blue:#4DB8FF;    --blue-ink:#9AD8FF;    --on-blue:#062A44;
+  --pink:#FF4FD8;    --pink-ink:#FFB4EE;    --on-pink:#3A0628;
+  --danger-ink:#FF9DB4;
+  --focus:#FF8BE4;
+  --glow-violet:0 0 6px rgba(168,108,255,.8),0 0 18px rgba(168,108,255,.45),0 0 38px rgba(168,108,255,.2);
+  --glow-blue:0 0 6px rgba(77,184,255,.85),0 0 20px rgba(77,184,255,.5),0 0 44px rgba(77,184,255,.25);
+  --glow-pink:0 0 6px rgba(255,79,216,.85),0 0 20px rgba(255,79,216,.5),0 0 44px rgba(255,79,216,.25);
+}
+
+/* 2 · THEMES ------------------------------------------------------------------------- */
+/* ink scale: 5 greys (was 20). ink-4 must pass 4.5:1 on its theme's busiest surface. */
+.theme-lacquer{
+  --ink-1:#F2EEF9;  /* primary text */
+  --ink-2:#E4DEEE;  /* story prose, secondary text */
+  --ink-3:#CBC5D9;  /* strong muted: token counts, icons */
+  --ink-4:#ABA4BE;  /* meta, sources, captions */
+  --ink-5:#928CA3;  /* faint: placeholders, ticks, off knobs */
+  --page:#040406; --ground:#08080C;
+  --lac:#15131C;    /* raised lacquer; tinted at runtime from the background photo */
+  --well:#0A0A0F;
+  --ghost-hover:rgba(255,255,255,.06);
+  --ground-bg:radial-gradient(ellipse at 50% -12%,rgba(77,184,255,.06),rgba(0,0,0,0) 50%),repeating-linear-gradient(0deg,rgba(255,255,255,.018) 0 1px,rgba(0,0,0,0) 1px 3px),repeating-linear-gradient(90deg,rgba(255,255,255,.014) 0 1px,rgba(0,0,0,0) 1px 3px),var(--ground);
+  --raised-bg:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,0) 38%,rgba(0,0,0,.14)),radial-gradient(rgba(255,255,255,.035) .6px,rgba(0,0,0,0) 1px) 0 0/3px 3px,var(--lac);
+  --raised-shadow:inset 0 1px 0 rgba(255,255,255,.09),inset 0 -1px 0 rgba(0,0,0,.5),0 1px 0 rgba(0,0,0,.7),0 8px 16px rgba(0,0,0,.55);
+  --raised-on-bg:var(--raised-bg);
+  --raised-on-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 0 1px rgba(255,255,255,.22),0 8px 16px rgba(0,0,0,.55);
+  --sunk-bg:var(--well);
+  --sunk-shadow:inset 0 3px 8px rgba(0,0,0,.8),inset 0 -1px 0 rgba(255,255,255,.06);
+  --switch-off-bg:#0A0A0F;
+  --switch-off-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.14);
+  --switch-on-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 10px rgba(77,184,255,.45);
+  --seg-on:var(--lac);
+  --press-shift:2px;--press-filter:none;
+  color:var(--ink-1);font-family:var(--font);
+}
+.theme-selenite{
+  --ink-1:#F4F0FB;
+  --ink-2:#E8E2F2;
+  --ink-3:#D4CEE2;
+  --ink-4:#C4BED5;  /* brighter than lacquer's: captions sit over streaks, neon and frost */
+  --ink-5:#ACA6BE;
+  --page:#030305; --ground:#060609;
+  --ghost-hover:rgba(255,255,255,.08);
+  --ground-bg:radial-gradient(ellipse 30% 40% at 12% 70%,rgba(168,108,255,.12),rgba(0,0,0,0) 70%),radial-gradient(ellipse 40% 22% at 45% 4%,rgba(77,184,255,.1),rgba(0,0,0,0) 70%),radial-gradient(ellipse 28% 45% at 90% 30%,rgba(255,79,216,.11),rgba(0,0,0,0) 70%),radial-gradient(ellipse 45% 18% at 50% 100%,rgba(77,184,255,.1),rgba(0,0,0,0) 70%),linear-gradient(rgba(255,255,255,.025) 1px,rgba(0,0,0,0) 1px) 0 0/22px 22px,linear-gradient(90deg,rgba(255,255,255,.025) 1px,rgba(0,0,0,0) 1px) 0 0/22px 22px,radial-gradient(rgba(255,255,255,.035) .6px,rgba(0,0,0,0) 1px) 0 0/3px 3px,var(--ground);
+  --raised-bg:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,.035));
+  --raised-shadow:inset 0 1px 2px rgba(255,255,255,.14),inset 0 -1px 3px rgba(0,0,0,.22),0 1px 4px rgba(0,0,0,.18);
+  --raised-on-bg:linear-gradient(180deg,rgba(255,255,255,.15),rgba(255,255,255,.07));
+  --raised-on-shadow:inset 0 1px 3px rgba(255,255,255,.22),inset 0 -1px 4px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.22);
+  --raised-hover-bg:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.06));
+  --sunk-bg:rgba(0,0,0,.3);
+  --sunk-shadow:inset 0 2px 7px rgba(0,0,0,.55),inset 0 -2px 4px -2px rgba(255,255,255,.1);
+  --switch-off-bg:rgba(0,0,0,.35);
+  --switch-off-shadow:inset 0 2px 5px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.16);
+  --switch-on-shadow:inset 0 1px 2px rgba(255,255,255,.55),0 0 8px rgba(77,184,255,.85),0 0 22px rgba(77,184,255,.45);
+  --seg-on:rgba(255,255,255,.14);
+  --press-shift:1px;--press-filter:brightness(1.12);
+  color:var(--ink-1);font-family:var(--font);
+}
+
+/* 3 · BASE --------------------------------------------------------------------------- */
+body{margin:0;background:#040406}
+a{color:var(--ink-1)}a:hover{color:#FFFFFF}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,[tabindex="0"]:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+textarea::placeholder,input::placeholder{color:var(--ink-5)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.btnreset{border:0;padding:0;margin:0;background-color:transparent;color:inherit;font:inherit;cursor:pointer}
+.scroll{overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+.ground{background:var(--ground-bg)}
+.pane{box-sizing:border-box}
+
+/* 4 · TEXT --------------------------------------------------------------------------- */
+.disp{font-weight:700}
+.prose{font-size:var(--fs-lg);line-height:var(--lh-prose);color:var(--ink-2)}
+.msgs .prose{font-size:var(--fs-lg);line-height:1.62}
+.prose p{margin:0 0 14px}
+.prose p:last-child{margin-bottom:0}
+.eyebrow{font-size:var(--fs-xs);line-height:16px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4)}
+.meta{font-size:var(--fs-sm);line-height:19px;color:var(--ink-4)}
+/* selenite plate content: lifts text above the crystal layers and gives it a soft shadow */
+.body{position:relative;z-index:3;text-shadow:0 1px 2px rgba(0,0,0,.6),0 0 10px rgba(0,0,0,.35)}
+
+/* 5 · MATERIALS ---------------------------------------------------------------------- */
+/* raised: a piece you can press. sunk: a well things sit in. ghost: no surface until hover. */
+.raised{position:relative;background:var(--raised-bg);box-shadow:var(--raised-shadow)}
+.raised.is-on{background:var(--raised-on-bg);box-shadow:var(--raised-on-shadow)}
+.sunk{background:var(--sunk-bg);box-shadow:var(--sunk-shadow)}
+.ghost{background:transparent;border:0}
+.ghost:hover{background:var(--ghost-hover)}
+.row:hover{background:rgba(255,255,255,.04)}
+.press{transition:translate .08s,filter .08s}
+.press:active{translate:0 var(--press-shift);filter:var(--press-filter)}
+
+/* gems: lacquer beads, selenite marbles. Text on a gem uses --on-<colour>. */
+.gem{position:relative;display:grid;place-items:center;border-radius:50%;flex:none;font-weight:700;overflow:hidden}
+.theme-lacquer .gem{box-shadow:inset 0 -3px 5px rgba(255,255,255,.28),inset 0 1px 1px rgba(255,255,255,.7),0 0 0 1.5px rgba(0,0,0,.5),0 2px 4px rgba(0,0,0,.5)}
+.theme-lacquer .gem::before{content:"";position:absolute;left:16%;right:16%;top:6%;height:42%;border-radius:50%;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,0));pointer-events:none}
+.theme-lacquer .gem-pink{background:radial-gradient(circle at 50% 85%,#FFE0F6,#FF6FD8 45%,#B01C8A 90%);color:var(--on-pink)}
+.theme-lacquer .gem-violet{background:radial-gradient(circle at 50% 85%,#EEDCFF,#B488FF 45%,#5B22B8 90%);color:var(--on-violet)}
+.theme-lacquer .gem-blue{background:radial-gradient(circle at 50% 85%,#DDF3FF,#62C3FF 45%,#0F5F9E 90%);color:var(--on-blue)}
+.theme-selenite .gem{isolation:isolate;color:#FFF7FF;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.theme-selenite .gem::before{content:"";position:absolute;inset:0;border-radius:50%;z-index:1;pointer-events:none;box-shadow:inset 0 2px 4px rgba(8,0,24,.6),inset 0 -2px 3px rgba(255,255,255,.4),inset 0 0 0 .5px rgba(255,255,255,.25)}
+.theme-selenite .gem::after{content:"";position:absolute;inset:0;border-radius:50%;z-index:2;pointer-events:none;background:radial-gradient(36% 24% at 35% 23%,rgba(255,255,255,.95),rgba(255,255,255,.5) 45%,rgba(255,255,255,0) 74%),radial-gradient(circle at 71% 75%,rgba(255,255,255,.55) 0 3.5%,rgba(255,255,255,0) 8%),radial-gradient(closest-side,rgba(255,255,255,0) 82%,rgba(255,255,255,.2) 92%,rgba(255,255,255,0) 100%)}
+.theme-selenite .gem-violet{background:radial-gradient(56% 40% at 50% 85%,rgba(226,196,255,.85),rgba(226,196,255,0) 72%),conic-gradient(from 230deg at 50% 55%,rgba(255,60,140,.55),rgba(255,60,140,0) 70deg,rgba(80,110,255,0) 150deg,rgba(80,110,255,.6) 205deg,rgba(80,110,255,0) 262deg,rgba(255,60,140,0) 300deg,rgba(255,60,140,.55) 360deg),radial-gradient(circle at 50% 47%,#9350e6 0%,#6a26c4 38%,#3d0f86 72%,#1c0546 100%)}
+.theme-selenite .gem-blue{background:radial-gradient(62% 46% at 50% 85%,rgba(206,240,255,.95),rgba(206,240,255,0) 74%),radial-gradient(circle at 50% 46%,#56aeff 0%,#2380ec 40%,#0d4fb4 74%,#062a6e 100%)}
+.theme-selenite .gem-pink{background:radial-gradient(56% 40% at 50% 85%,rgba(255,196,228,.85),rgba(255,196,228,0) 72%),linear-gradient(180deg,rgba(70,0,30,.5) 0%,rgba(70,0,30,0) 30%,rgba(70,0,30,0) 68%,rgba(70,0,30,.45) 100%),radial-gradient(circle at 50% 47%,#ff58b6 0%,#e21f88 40%,#9c0a5a 74%,#4e0330 100%)}
+.theme-selenite .gem-pink::before{background:repeating-linear-gradient(90deg,rgba(255,214,238,0) 0 3px,rgba(255,214,238,.2) 3px 3.6px,rgba(255,214,238,0) 3.6px 7px);-webkit-mask:linear-gradient(180deg,rgba(0,0,0,0),#000 28%,#000 72%,rgba(0,0,0,0));mask:linear-gradient(180deg,rgba(0,0,0,0),#000 28%,#000 72%,rgba(0,0,0,0))}
+/* custom gems: any colour. The card stores a hex and the gem carries it as --gem; highlight, shadow
+   and initials are derived from it, so one rule serves every colour (OKLCH relative colour syntax).
+   Initials flip at OKLCH lightness 0.5: lighter beads get dark initials, darker beads get light
+   initials with a shadow. The presets above keep their hand-tuned looks, selenite's shimmer and stripes included. */
+.gem-custom{--gem:#B488FF}
+.theme-lacquer .gem-custom{background:radial-gradient(circle at 50% 85%,oklch(from var(--gem) calc(l + (1 - l) * .74) calc(c * .27) h),var(--gem) 45%,oklch(from var(--gem) calc(l * .63) min(calc(c * 1.15), .25) h) 90%);color:oklch(from var(--gem) clamp(.22, (.5 - l) * 1000, .99) min(calc(c * .5), .1) h);text-shadow:0 1px 2px oklch(from var(--gem) 0 0 0 / clamp(0, (.5 - l) * 1000, .6))}
+.theme-selenite .gem-custom{background:radial-gradient(56% 40% at 50% 85%,oklch(from var(--gem) calc(l + (1 - l) * .7) calc(c * .4) h / .85),oklch(from var(--gem) calc(l + (1 - l) * .7) calc(c * .4) h / 0) 72%),radial-gradient(circle at 50% 47%,oklch(from var(--gem) min(calc(l + .12), .95) c h) 0%,var(--gem) 40%,oklch(from var(--gem) calc(l * .74) calc(c * .9) h) 74%,oklch(from var(--gem) calc(l * .47) calc(c * .6) h) 100%);color:oklch(from var(--gem) clamp(.2, (.5 - l) * 1000, .985) min(calc(c * .4), .08) h);text-shadow:0 1px 2px oklch(from var(--gem) 0 0 0 / clamp(0, (.5 - l) * 1000, .7))}
+.glow-violet{box-shadow:var(--glow-violet)}
+.glow-blue{box-shadow:var(--glow-blue)}
+.glow-pink{box-shadow:var(--glow-pink)}
+
+/* 6 · CONTROLS ----------------------------------------------------------------------- */
+.ib{width:var(--hit);height:var(--hit);display:grid;place-items:center;border:0;border-radius:14px;flex:none;text-decoration:none;padding:0}
+/* .hit44 grows a small control's tap area with an invisible ::after. Not for gems: they clip their
+   overflow and use ::after themselves, so a gem that is a control sits inside a 44px button instead. */
+.hit44{position:relative}
+.hit44::after{content:"";position:absolute;left:-4px;right:-4px;top:-9px;bottom:-9px}
+
+/* buttons: .btn is the shape, then one look. Primary is blue, danger is the delete look,
+   quiet-danger is a delete you reach before the confirmation. A plain .btn takes .raised or .ghost. */
+.btn{height:var(--hit);border:0;border-radius:13px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:var(--fs-sm);text-decoration:none;color:var(--ink-1)}
+.btn-primary{background:var(--blue);color:var(--on-blue);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 0 12px rgba(77,184,255,.45)}
+.btn-danger{background:var(--danger-ink);color:var(--on-pink);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 0 12px rgba(255,90,140,.35)}
+.btn-quiet-danger{background:transparent;color:var(--danger-ink)}
+.btn-quiet-danger:hover{background:rgba(255,90,130,.1)}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.45;cursor:default;box-shadow:none}
+
+/* text field: sits in a .sunk well */
+.inp{width:100%;box-sizing:border-box;height:var(--hit);border:0;border-radius:12px;padding:0 14px;font-size:var(--fs-md)}
+
+/* switch: state comes from aria-checked, nothing else */
+.switch{position:relative;flex:none;width:46px;height:28px;border:0;padding:0;border-radius:14px;cursor:pointer;background:var(--switch-off-bg);box-shadow:var(--switch-off-shadow);transition:background-color .15s,box-shadow .15s}
+.switch::after{content:"";position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
+.switch .knob{position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;background:var(--ink-5);box-shadow:0 1px 3px rgba(0,0,0,.5);transition:left .15s}
+.switch[aria-checked="true"] .knob{left:22px;background:#F4FBFF}
+.switch[aria-checked="true"]{background:var(--blue);box-shadow:var(--switch-on-shadow)}
+@media (prefers-reduced-motion:reduce){.switch,.switch .knob{transition:none}}
+
+/* segmented control / tabs: state comes from aria-selected */
+.seg{display:flex;padding:3px;border-radius:var(--r-md)}
+.seg button{height:34px;border:0;border-radius:var(--r-sm);padding:0 14px;font-size:var(--fs-sm);font-weight:700;background:transparent;color:var(--ink-4)}
+.seg button[aria-selected="true"]{background:var(--seg-on);color:var(--ink-1);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 6px rgba(0,0,0,.6)}
+@media (pointer:coarse){.seg button{height:var(--hit)}}
+
+/* role pill: class follows the role name */
+.role{position:relative;height:28px;border:0;border-radius:var(--r-sm);padding:0 9px 0 10px;font-size:var(--fs-xs);font-weight:700;letter-spacing:.02em;display:flex;align-items:center;gap:5px;flex:none}
+.role-system{color:#D9C2FF;background:rgba(168,108,255,.16);box-shadow:inset 0 0 0 1px rgba(168,108,255,.4)}
+.role-user{color:#A9DCFF;background:rgba(77,184,255,.14);box-shadow:inset 0 0 0 1px rgba(77,184,255,.4)}
+.role-assistant{color:#FFB0EC;background:rgba(255,79,216,.13);box-shadow:inset 0 0 0 1px rgba(255,79,216,.4)}
+.role-history{color:var(--ink-3);background:rgba(255,255,255,.08)}
+
+/* token count chip */
+.tok{min-width:52px;height:28px;box-sizing:border-box;padding:0 9px;border-radius:var(--r-sm);display:grid;place-items:center;font-size:var(--fs-xs);font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink-3);flex:none}
+
+.chev{width:36px;height:var(--hit);border:0;background:transparent;border-radius:10px;display:grid;place-items:center;color:var(--ink-4);flex:none;padding:0}
+.chev:hover{background:var(--ghost-hover)}
+.step{position:relative;width:30px;height:30px;border:0;border-radius:8px;display:grid;place-items:center;padding:0;background:rgba(255,255,255,.06);font-weight:700}
+.step:hover{background:rgba(255,255,255,.12)}
+.step[aria-disabled="true"]{opacity:.35;cursor:default}
+
+/* grip strip: a tactile tile of truncated domes on a block's edge. Drag it, or tap it for move options. */
+.bumps{position:absolute;left:0;top:0;width:32px;height:100%;max-height:64px;border:0;padding:0;margin:0;background:transparent;border-radius:16px 0 0 16px;cursor:grab;z-index:1}
+.bumps::before{content:"";position:absolute;left:8px;top:11px;bottom:11px;width:20px;border-radius:5px;background-color:rgba(168,108,255,.055);box-shadow:inset 0 0 0 1px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.05),0 1px 0 rgba(255,255,255,.045);background-image:radial-gradient(circle at 50% 40%,rgba(255,255,255,.24) 0,rgba(255,255,255,.24) .8px,rgba(255,255,255,0) 1.2px),radial-gradient(circle at 50% 50%,rgba(255,255,255,.085) 0 1.6px,rgba(255,255,255,0) 2px),radial-gradient(circle at 50% 64%,rgba(0,0,0,.5) 0 1.6px,rgba(0,0,0,0) 2.2px);background-size:6px 6px;background-position:1px 1px;background-repeat:repeat}
+.bumps:hover::before{filter:brightness(1.45)}
+.bumps:active{cursor:grabbing}
+.bumps:focus-visible{outline-offset:-3px}
+
+/* colour picker: a saturation/brightness area, a hue slider and a hex field. Changes apply live;
+   Cancel puts back the colour from when the picker opened. */
+.huewheel{position:relative;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:none;background:conic-gradient(from 90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.huewheel::before{content:"";position:absolute;inset:3px;border-radius:50%;background:#0c0b10}
+.huewheel>*{position:relative}
+.svpick{position:relative;border-radius:12px;touch-action:none;cursor:crosshair;background:linear-gradient(0deg,#000,rgba(0,0,0,0)),linear-gradient(90deg,#fff,hsl(var(--hue,280) 100% 50%));box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 0 0 1px rgba(0,0,0,.4)}
+.svpick .thumb{position:absolute;width:24px;height:24px;margin:-12px 0 0 -12px;padding:0;border:3px solid #fff;border-radius:50%;box-sizing:border-box;background:var(--gem);box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.6);cursor:grab}
+.svpick .thumb::after{content:"";position:absolute;inset:-13px;border-radius:50%}
+.svpick .thumb:focus-visible{outline:none;box-shadow:0 0 0 1px rgba(0,0,0,.55),0 0 0 4px var(--focus)}
+.hue{-webkit-appearance:none;appearance:none;display:block;width:100%;height:28px;margin:0;padding:0;background:transparent;cursor:pointer}
+.hue::-webkit-slider-runnable-track{height:14px;border-radius:7px;background:linear-gradient(90deg,#f00,#ff0 16.67%,#0f0 33.33%,#0ff 50%,#00f 66.67%,#f0f 83.33%,#f00);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),inset 0 2px 4px rgba(0,0,0,.35)}
+.hue::-moz-range-track{height:14px;border-radius:7px;background:linear-gradient(90deg,#f00,#ff0 16.67%,#0f0 33.33%,#0ff 50%,#00f 66.67%,#f0f 83.33%,#f00)}
+.hue::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;margin-top:-6px;border:3px solid #fff;border-radius:50%;box-sizing:border-box;background:var(--thumb,#f00);box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.6)}
+.hue::-moz-range-thumb{width:26px;height:26px;border:3px solid #fff;border-radius:50%;box-sizing:border-box;background:var(--thumb,#f00);box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.6)}
+.hue:focus-visible{outline:none}
+.hue:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 1px rgba(0,0,0,.55),0 0 0 4px var(--focus)}
+.hue:focus-visible::-moz-range-thumb{box-shadow:0 0 0 1px rgba(0,0,0,.55),0 0 0 4px var(--focus)}
+@media (pointer:coarse){.hue{height:var(--hit)}}
+.hexin{width:120px;padding:0 10px;font-variant-numeric:tabular-nums;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+
+/* 7 · CHAT --------------------------------------------------------------------------- */
+.mhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.dia{width:5px;height:5px;transform:rotate(45deg);background:var(--ink-5)}
+.msgs{position:absolute;left:0;width:390px;box-sizing:border-box;padding:0 20px 14px;display:flex;flex-direction:column;justify-content:flex-end;gap:22px;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0),#000 36px);mask-image:linear-gradient(180deg,rgba(0,0,0,0),#000 36px)}
+.caret{animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
+
+/* 8 · PROMPTS PAGE ------------------------------------------------------------------- */
+.blk{position:relative;border-radius:var(--r-lg)}
+.bhead{display:flex;align-items:center;gap:8px;min-height:56px;padding:6px 8px 6px 36px}
+.btitle{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:0;background:transparent;padding:4px 0;text-align:left}
+.btitle .t{font-size:var(--fs-md);line-height:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.btitle .src{font-size:var(--fs-xs);line-height:16px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.folder{border-radius:18px;margin-top:10px}
+.folder::before{content:"";position:absolute;left:34px;top:-9px;width:96px;height:13px;border-radius:10px 10px 0 0;background:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.1)}
+.fwell{margin:0 10px 10px 34px;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:8px}
+.fwell .blk{border-radius:13px}
+.fwell .bhead{min-height:50px}
+.field{display:flex;align-items:center;gap:8px;min-height:52px;padding:4px 8px 4px 10px;border-radius:var(--r-md)}
+.field:hover{background:rgba(255,255,255,.035)}
+.lane-msg{display:flex;align-items:center;gap:10px;min-height:40px;padding:2px 10px;font-size:var(--fs-sm);color:var(--ink-3)}
+.lane-msg .x{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-5)}
+.slot{align-items:center;gap:8px;margin:2px 0 2px 26px;padding:4px 6px 4px 10px;border-radius:var(--r-md);min-height:48px}
+.mac{display:inline-block;padding:0 6px;margin:0 1px;border-radius:7px;font-weight:700;color:#D9C2FF;background:rgba(168,108,255,.16);box-shadow:inset 0 0 0 1px rgba(168,108,255,.38);line-height:1.35}
+.mac::before{content:"{{";opacity:.55}
+.mac::after{content:"}}";opacity:.55}
+.mac.bad{color:#FFB4C6;background:rgba(255,80,120,.12);box-shadow:inset 0 0 0 1px rgba(255,90,130,.5);text-decoration:underline wavy rgba(255,110,150,.9);text-underline-offset:4px}
+.brace::before{content:"{{"}
+.filled{color:#F4EEFF;text-decoration:underline dotted rgba(201,166,255,.8);text-underline-offset:4px}
+.dropline{height:0;margin:2px 10px;border-top:2px solid #FF6FD8;box-shadow:0 0 10px rgba(255,79,216,.8);position:relative}
+.dropline::before,.dropline::after{content:"";position:absolute;top:-6px;width:10px;height:10px;border-radius:50%;background:#FF6FD8;box-shadow:0 0 8px rgba(255,79,216,.9)}
+.dropline::before{left:-5px}.dropline::after{right:-5px}
+.pv-entry{padding:12px 0 14px;border-bottom:1px solid rgba(255,255,255,.07)}
+.pv-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.pv-text{font-size:var(--fs-sm);line-height:21px;color:var(--ink-2)}
+/* phone rows */
+.prow{border-radius:var(--r-lg);padding:10px 10px 10px 46px;display:flex;flex-direction:column;gap:8px}
+.prow .l1{display:flex;align-items:center;gap:10px;min-height:28px}
+.prow .l2{display:flex;align-items:center;gap:8px}
+.prow .bumps{width:var(--hit);max-height:94px}
+.prow .bumps::before{left:13px;top:12px;bottom:12px}
+.prow .chev{width:var(--hit)}
+.pfwell{margin:4px -4px 0 -36px;padding:8px;border-radius:14px;display:flex;flex-direction:column;gap:8px}
+.ptitle{flex:1;min-width:0;min-height:var(--hit);border:0;background:transparent;padding:0;text-align:left;display:flex;flex-direction:column}
+.ptitle .t{font-size:var(--fs-md);line-height:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptitle .src{font-size:var(--fs-xs);line-height:16px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.role::after,.step::after{content:"";position:absolute;left:-3px;right:-3px;top:-8px;bottom:-8px}
+.macbar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:8px 12px;align-items:center}
+.macbar .mac{flex:none;position:relative;font-size:var(--fs-sm);padding:3px 9px}
+.macbar .mac .hit{position:absolute;left:-3px;right:-3px;top:-10px;bottom:-10px}
+
+/* 9 · OVERLAYS ----------------------------------------------------------------------- */
+/* While any of these is open, everything behind it is inert: not reachable by Tab or a screen reader. */
+.scrim{position:absolute;inset:0;z-index:6;background:rgba(2,2,4,.58)}
+.menu{position:absolute;z-index:6;border-radius:18px;padding:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 0 1px rgba(255,255,255,.1),0 22px 50px rgba(0,0,0,.75)}
+.menu button{width:100%;height:48px;border:0;background:transparent;border-radius:var(--r-md);display:flex;align-items:center;gap:12px;padding:0 12px;font-size:var(--fs-md);font-weight:700;text-align:left}
+.menu button:hover{background:var(--ghost-hover)}
+
+/* 10 · SELENITE PLATE MACHINERY ------------------------------------------------------ */
+/* A plate = .gl box holding: .fx (refraction + smoke), .light, .zone (painted crystal), .spec (light),
+   twinkles, then .body with the UI. Plate-specific images and filters (fx-<name>, mk-<name>,
+   zone-<name>, spec-<name>) stay with the board, since they're generated per plate outline. */
+.gl{position:absolute;z-index:2}
+.fx{position:absolute;inset:0;z-index:0;background:rgba(10,8,18,.34)}
+.light{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(170deg,rgba(235,240,255,.06),rgba(255,255,255,0) 30%,rgba(255,255,255,0) 75%,rgba(220,225,255,.04))}
+.zone,.spec{position:absolute;inset:0;pointer-events:none;background-repeat:no-repeat;background-size:100% 100%}
+.zone{z-index:1}
+.spec{z-index:2}
+.under{position:absolute;z-index:1;pointer-events:none}
+.tw{position:absolute;z-index:2;width:24px;height:24px;margin:-12px 0 0 -12px;pointer-events:none;background:radial-gradient(circle,rgba(255,255,255,1) 0 1.3px,rgba(255,255,255,.45) 2.4px,rgba(255,255,255,0) 4.5px),linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.9) 50%,rgba(255,255,255,0)) center/100% 1.3px no-repeat,linear-gradient(0deg,rgba(255,255,255,0),rgba(255,255,255,.9) 50%,rgba(255,255,255,0)) center/1.3px 100% no-repeat;animation:twinkle 4.6s ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:.12;transform:scale(.45)}45%{opacity:1;transform:scale(1)}60%{opacity:.8;transform:scale(.9)}}
+@media (prefers-reduced-motion:reduce){.tw{animation:none;opacity:.7}}
+/* elements cut to a plate's outline: .cut holds a .shape (clipped surface + .edge stroke) under its content */
+.cut{position:absolute;border:0;padding:0;margin:0;background:transparent;text-align:left;color:inherit;font:inherit}
+.cutrow{position:absolute}
+.shape{position:absolute;inset:0;pointer-events:none}
+.shape.raised,.shape.sunk{box-shadow:none}
+.edge{position:absolute;left:0;top:0;overflow:visible}
+.cut:hover .shape.raised{background:var(--raised-hover-bg,var(--raised-bg))}
+.cut:hover .shape.ghost,.cut:active .shape.ghost,.cutrow:hover .shape{background:rgba(255,255,255,.1)}
+.cut:focus-visible{outline:none}
+.cut:focus-visible .ring{stroke:var(--focus);stroke-width:6px}

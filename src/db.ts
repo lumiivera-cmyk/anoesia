@@ -112,6 +112,23 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (scope, key)
   );
   `,
+
+  // 3: card colours (a preset name or a hex), and the last custom one picked.
+  `
+  ALTER TABLE cards ADD COLUMN colour TEXT NOT NULL DEFAULT 'violet';
+  ALTER TABLE cards ADD COLUMN custom_colour TEXT NOT NULL DEFAULT '';
+  `,
+  // 4: background photos you upload (the files are in the data folder's photos/).
+  `
+  CREATE TABLE photos (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    ext        TEXT NOT NULL,
+    tint       TEXT NOT NULL,
+    position   TEXT NOT NULL DEFAULT '50% 50%',
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

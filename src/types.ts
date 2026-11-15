@@ -60,6 +60,10 @@ export interface Card {
    * or a faction rather than someone to write.
    */
   isCharacter: boolean;
+  /** Its bead: a preset (`violet`, `blue`, `pink`) or any colour as `#RRGGBB`. */
+  colour: string;
+  /** The last custom colour picked, kept after switching back to a preset ("" if none yet). */
+  customColour: string;
   fields: CardField[];
   createdAt: string;
   updatedAt: string;
@@ -102,6 +106,36 @@ export interface Settings {
   rpProfileId: string;
   /** The main prompt: the first system block, with macros. */
   mainPrompt: string;
+  /** The photo behind the app and how the lacquer meets it. */
+  background: Background;
+}
+
+/** A background photo you uploaded. The file is in the data folder, served at `url`. */
+export interface Photo {
+  id: string;
+  name: string;
+  /** Where the browser loads it: media/<id>.<ext>. */
+  url: string;
+  /** The dark colour the lacquer leans towards, worked out from the photo when it's added. */
+  tint: string;
+  /** How the photo is framed (CSS object-position). */
+  position: string;
+  createdAt: string;
+}
+
+/** Lacquer finishes: opaque, 72% with a blur, or 50% with a lighter blur. */
+export type Finish = "roiro" | "tamenuri" | "shunkei";
+
+export interface Background {
+  /** An uploaded photo's id, or "none". */
+  photo: string;
+  finish: Finish;
+  /** How far the photo's hue tints the lacquer, 0 to 1. */
+  tint: number;
+  /** How much the photo is darkened, 0 to 0.8. */
+  dim: number;
+  /** How dark the reading column is over the photo, 0.3 to 0.95; null for the default (0.72 wide, 0.7 on a phone). */
+  window: number | null;
 }
 
 /** What a prompt block is. */

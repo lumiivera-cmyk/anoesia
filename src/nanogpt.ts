@@ -338,6 +338,8 @@ export interface ModelInfo {
   toolCalling?: boolean;
   /** The most tokens it can write in one reply. */
   maxOutputTokens?: number;
+  /** The most tokens it can read: prompt and reply together. */
+  contextLength?: number;
 }
 
 /**
@@ -353,7 +355,7 @@ export async function listModels(options: ApiOptions, provider: ProviderId = "na
   if (!Array.isArray(data)) return [];
   return data
     .flatMap((raw) => {
-      const entry = raw as { id?: unknown; capabilities?: Record<string, unknown>; max_output_tokens?: unknown };
+      const entry = raw as { id?: unknown; capabilities?: Record<string, unknown>; max_output_tokens?: unknown; context_length?: unknown };
       if (typeof entry?.id !== "string") return [];
       const info: ModelInfo = { id: entry.id };
       const caps = entry.capabilities;
@@ -361,6 +363,8 @@ export async function listModels(options: ApiOptions, provider: ProviderId = "na
       if (typeof caps?.tool_calling === "boolean") info.toolCalling = caps.tool_calling;
       const max = entry.max_output_tokens;
       if (typeof max === "number" && Number.isFinite(max) && max > 0) info.maxOutputTokens = max;
+      const context = entry.context_length;
+      if (typeof context === "number" && Number.isFinite(context) && context > 0) info.contextLength = context;
       return [info];
     })
     .sort((a, b) => a.id.localeCompare(b.id));
