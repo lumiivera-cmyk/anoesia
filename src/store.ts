@@ -9,11 +9,11 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_FIELDS, type ParsedCard } from "./cards.ts";
 import { NotFoundError, ValidationError, newId } from "./errors.ts";
 import { DEFAULT_MAIN_PROMPT } from "./prompt.ts";
-import type { Background, BlockKind, Card, CardField, Chat, FieldKey, Finish, Message, PhotoName, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
+import type { Background, BlockKind, Card, CardField, Chat, FieldKey, Finish, Message, Photo, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
 
 const now = () => new Date().toISOString();
 
-export const DEFAULT_BACKGROUND: Background = { photo: "crossing", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
+export const DEFAULT_BACKGROUND: Background = { photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
 
 const DEFAULT_SETTINGS: Settings = {
   rpProfileId: "",
@@ -21,7 +21,8 @@ const DEFAULT_SETTINGS: Settings = {
   background: DEFAULT_BACKGROUND,
 };
 
-const PHOTOS: PhotoName[] = ["none", "crossing", "purple alley", "kimbap corner", "pink street", "downpour", "lanterns"];
+export const PHOTO_TYPES: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+const POSITION = /^\d{1,3}% \d{1,3}%$/;
 const FINISHES: Finish[] = ["roiro", "tamenuri", "shunkei"];
 const PRESET_COLOURS = ["violet", "blue", "pink"];
 const HEX = /^#[0-9A-F]{6}$/;
@@ -31,6 +32,36 @@ type Row = Record<string, unknown>;
 export class Store {
   constructor(readonly db: Database) {}
 
+  // ------------------------------------------------------------ photos
+
+  photos(): Photo[] {
+    return (this.db.query("SELECT * FROM photos ORDER BY created_at, id").all() as Row[]).map(toPhoto);
+  }
+
+  findPhoto(id: string): (Photo & { ext: string }) | null {
+    const row = this.db.query("SELECT * FROM photos WHERE id = ?").get(id) as Row | null;
+    return row ? { ...toPhoto(row), ext: String(row.ext) } : null;
+  }
+
+  /** Record a photo whose file the caller saves as photos/<id>.<ext>. */
+  addPhoto(raw: { name?: unknown; ext: string; tint?: unknown; position?: unknown }): Photo {
+    if (!PHOTO_TYPES[raw.ext]) throw new ValidationError("A photo is a JPEG, PNG or WebP image.");
+    const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 60) : "my photo";
+    const tint = typeof raw.tint === "string" && HEX.test(raw.tint.toUpperCase()) ? raw.tint.toUpperCase() : "#15131C";
+    const position = typeof raw.position === "string" && POSITION.test(raw.position) ? raw.position : "50% 50%";
+    const id = newId();
+    this.db.query("INSERT INTO photos (id, name, ext, tint, position, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, name, raw.ext, tint, position, now());
+    return toPhoto(this.db.query("SELECT * FROM photos WHERE id = ?").get(id) as Row);
+  }
+
+  /** Forget a photo (the caller deletes its file). The background goes back to none if it was showing. */
+  deletePhoto(id: string): { ext: string } {
+    const photo = this.findPhoto(id);
+    if (!photo) throw new NotFoundError("photo");
+    this.db.query("DELETE FROM photos WHERE id = ?").run(id);
+    return { ext: photo.ext };
+  }
+
   // ------------------------------------------------------------ settings
 
   settings(): Settings {
@@ -38,6 +69,8 @@ export class Store {
     const out: Settings = { ...DEFAULT_SETTINGS };
     for (const row of rows) if (row.key in out) (out as unknown as Row)[row.key] = JSON.parse(row.value);
     out.background = { ...DEFAULT_BACKGROUND, ...out.background };
+    // A photo that's gone (or one of the old built-in names) shows as none.
+    if (out.background.photo !== "none" && !this.findPhoto(out.background.photo)) out.background.photo = "none";
     if (out.rpProfileId && !this.findProfile(out.rpProfileId)) out.rpProfileId = "";
     return out;
   }
@@ -53,7 +86,10 @@ export class Store {
       if (typeof raw.mainPrompt !== "string") throw new ValidationError("The main prompt must be text.");
       clean.mainPrompt = raw.mainPrompt;
     }
-    if (raw.background !== undefined) clean.background = backgroundInput(raw.background, this.settings().background);
+    if (raw.background !== undefined) {
+      clean.background = backgroundInput(raw.background, this.settings().background);
+      if (clean.background.photo !== "none" && !this.findPhoto(clean.background.photo)) throw new NotFoundError("photo");
+    }
     const put = this.db.query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
     for (const [key, value] of Object.entries(clean)) put.run(key, JSON.stringify(value));
     return this.settings();
@@ -651,8 +687,8 @@ function backgroundInput(raw: unknown, current: Background): Background {
   const b = raw as Row;
   const out: Background = { ...current };
   if (b.photo !== undefined) {
-    if (!PHOTOS.includes(b.photo as PhotoName)) throw new ValidationError("Unknown background photo.");
-    out.photo = b.photo as PhotoName;
+    if (typeof b.photo !== "string" || !b.photo) throw new ValidationError("The background photo is a photo's id, or none.");
+    out.photo = b.photo;
   }
   if (b.finish !== undefined) {
     if (!FINISHES.includes(b.finish as Finish)) throw new ValidationError("The finish is roiro, tamenuri or shunkei.");
@@ -724,4 +760,8 @@ function profileFields(raw: Row, creating: boolean): Partial<Profile> {
     out.extraParams = text;
   }
   return out;
+}
+
+function toPhoto(row: Row): Photo {
+  return { id: String(row.id), name: String(row.name), url: `media/${row.id}.${row.ext}`, tint: String(row.tint), position: String(row.position), createdAt: String(row.created_at) };
 }

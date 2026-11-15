@@ -47,7 +47,8 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
 
 - **The lacquer design**: black lacquer panels over a night-city photo, the
-  same on phone and desktop. In settings, pick the photo (or none), the
+  same on phone and desktop. In settings, add your own photos (they're kept
+  in the data folder, behind the login, and never in git), pick one or none, the
   finish (roiro, tamenuri or shunkei), how much the photo tints the panels,
   how dim it is and how much it shows through. "Back to readable" puts dim
   and window back. Each card has a bead colour: violet, blue, pink or any
@@ -81,8 +82,10 @@ To run it on the Amaedori server, always up: [docs/hosting.md](docs/hosting.md).
 
 `public/anoesia.css` is the design system from the design handoff, copied
 as is: tokens, glass and lacquer surfaces, beads, buttons, switches. The
-app's own layout is in `public/app.css`. The six background photos are in
-`public/photos`, with their framing and tint in `public/js/theme.js`. The selenite
+app's own layout is in `public/app.css`. No photos ship with the app: the
+design's six came from a wallpaper site with no licence to share them, so
+you upload your own in settings. Each photo's tint is worked out from its
+colours when it's added. The selenite
 theme is designed but not built yet.
 
 Not in this version, though designed: nudges and the agent (steps 3 and 4).

@@ -110,14 +110,25 @@ export interface Settings {
   background: Background;
 }
 
-/** Photo names (see public/js/theme.js), or "none". */
-export type PhotoName = "none" | "crossing" | "purple alley" | "kimbap corner" | "pink street" | "downpour" | "lanterns";
+/** A background photo you uploaded. The file is in the data folder, served at `url`. */
+export interface Photo {
+  id: string;
+  name: string;
+  /** Where the browser loads it: media/<id>.<ext>. */
+  url: string;
+  /** The dark colour the lacquer leans towards, worked out from the photo when it's added. */
+  tint: string;
+  /** How the photo is framed (CSS object-position). */
+  position: string;
+  createdAt: string;
+}
 
 /** Lacquer finishes: opaque, 72% with a blur, or 50% with a lighter blur. */
 export type Finish = "roiro" | "tamenuri" | "shunkei";
 
 export interface Background {
-  photo: PhotoName;
+  /** An uploaded photo's id, or "none". */
+  photo: string;
   finish: Finish;
   /** How far the photo's hue tints the lacquer, 0 to 1. */
   tint: number;

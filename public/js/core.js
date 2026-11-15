@@ -11,6 +11,8 @@ export const state = {
   cards: [],
   chats: [],
   macros: [],
+  /** Background photos you uploaded. */
+  photos: [],
   apiKeySet: false,
   vertexReady: false,
   /** The open chat, its messages, and whether a reply is being written. */

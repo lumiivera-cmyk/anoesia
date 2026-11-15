@@ -4,10 +4,10 @@
  * so it's built from the shared components.
  */
 
-import { $, api, attempt, escapeHtml, loadState, state } from "./core.js";
+import { $, api, attempt, escapeHtml, loadState, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { closeOverlay, confirmDialog, openOverlay } from "./overlay.js";
-import { applyBackground, FINISHES, PHOTOS, READABLE } from "./theme.js";
+import { applyBackground, FINISHES, preparePhoto, READABLE } from "./theme.js";
 
 const DEFAULT_MAIN_PROMPT =
   "This is a roleplay between {{user}} and you, the narrator. You write the world and everyone in it: {{cast}}. {{user}} is written only by the user: never write their words, actions or thoughts.";
@@ -25,18 +25,24 @@ const windowDefault = () => (matchMedia("(max-width: 899px)").matches ? 0.7 : 0.
 function render() {
   const bg = state.settings.background;
   const win = bg.window ?? windowDefault();
-  const photos = ["none", ...Object.keys(PHOTOS)];
+  const photos = state.photos ?? [];
+  const current = photos.find((p) => p.id === bg.photo);
   $("settings-dialog").innerHTML = `
     <header class="dlg-head"><h2 class="disp" id="settings-title">Settings</h2><button type="button" class="ghost press ib" data-close aria-label="Close">${icon.close()}</button></header>
     <div class="dlg-body scroll">
       <section aria-labelledby="bg-h">
         <h3 class="eyebrow" id="bg-h">background</h3>
-        <div role="radiogroup" aria-label="Photo" class="photo-grid">${photos
-          .map(
-            (p) => `<button type="button" role="radio" class="photo-pick press${p === "none" ? " none" : ""}" aria-checked="${bg.photo === p}" data-photo="${p}">
-              ${p === "none" ? `<span class="ph-none" aria-hidden="true"></span>` : `<img src="${PHOTOS[p].file}" alt="" loading="lazy" style="object-position:${PHOTOS[p].position}" />`}<span class="ph-name">${p}</span></button>`,
-          )
-          .join("")}</div>
+        <div role="radiogroup" aria-label="Photo" class="photo-grid">
+            <button type="button" role="radio" class="photo-pick press none" aria-checked="${bg.photo === "none"}" data-photo="none"><span class="ph-none" aria-hidden="true"></span><span class="ph-name">none</span></button>${photos
+              .map(
+                (p) => `<button type="button" role="radio" class="photo-pick press" aria-checked="${bg.photo === p.id}" data-photo="${p.id}">
+              <img src="${escapeHtml(p.url)}" alt="" loading="lazy" style="object-position:${escapeHtml(p.position)}" /><span class="ph-name">${escapeHtml(p.name)}</span></button>`,
+              )
+              .join("")}
+          <label class="photo-add press">${icon.plus(20)}<span>add a photo</span><input type="file" accept="image/jpeg,image/png,image/webp" id="photo-file" class="sr-file" /></label>
+        </div>
+        <p class="meta small" id="photo-status" role="status">${current ? "" : photos.length ? "" : "Add a photo of your own to sit behind the app. It's kept on your server, not shared."}</p>
+        ${current ? `<button type="button" class="btn btn-quiet-danger press" data-remove-photo="${current.id}">${icon.trash()} remove “${escapeHtml(current.name)}”</button>` : ""}
         <div class="set-row"><span class="set-label" id="finish-l">finish</span>
           <div class="seg sunk" role="radiogroup" aria-labelledby="finish-l">${Object.entries(FINISHES)
             .map(([k, f]) => `<button type="button" role="radio" aria-checked="${bg.finish === k}" data-finish="${k}" title="${f.hint}">${f.label}</button>`)
@@ -161,8 +167,33 @@ function saveBackground(change, redraw = false) {
   }
 }
 
+/** Upload a picked photo, then show it. */
+async function addPhoto(file) {
+  const status = $("photo-status");
+  status.textContent = "Adding the photo…";
+  try {
+    const { blob, tint, name } = await preparePhoto(file);
+    const q = new URLSearchParams({ name, tint, position: "50% 50%" });
+    const response = await fetch(`api/photos?${q}`, { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401 && data.login) location.href = "login";
+    if (!response.ok) throw new Error(data.error || "Couldn't add the photo.");
+    state.photos = [...(state.photos ?? []), data];
+    saveBackground({ photo: data.id }, true);
+    $("settings-dialog").querySelector(`[data-photo="${data.id}"]`)?.focus();
+  } catch (error) {
+    status.textContent = "";
+    showError(error.message);
+  }
+}
+
 export function wireSettings() {
   const d = $("settings-dialog");
+  d.addEventListener("change", (e) => {
+    if (e.target.id !== "photo-file" || !e.target.files?.[0]) return;
+    addPhoto(e.target.files[0]);
+    e.target.value = "";
+  });
   d.addEventListener("click", async (e) => {
     const t = e.target;
     if (t.closest("[data-close]")) return closeOverlay(d);
@@ -171,6 +202,20 @@ export function wireSettings() {
     const finish = t.closest("[data-finish]");
     if (finish) return saveBackground({ finish: finish.dataset.finish }, true);
     if (t.closest("[data-readable]")) return saveBackground({ ...READABLE }, true);
+    const rm = t.closest("[data-remove-photo]");
+    if (rm) {
+      const photo = state.photos.find((p) => p.id === rm.dataset.removePhoto);
+      const ok = await confirmDialog({ title: `Remove “${photo?.name ?? "this photo"}”?`, body: "It's deleted from your server. The background goes back to none.", confirm: "remove photo", keep: "keep it", opener: rm });
+      if (!ok) return;
+      const done = await attempt(() => api("DELETE", `/api/photos/${rm.dataset.removePhoto}`));
+      if (!done) return;
+      state.photos = state.photos.filter((p) => p.id !== rm.dataset.removePhoto);
+      state.settings = done.settings;
+      applyBackground(state.settings.background);
+      render();
+      d.querySelector('[data-photo="none"]')?.focus();
+      return;
+    }
     if (t.closest("#new-profile")) {
       const p = await attempt(() => api("POST", "/api/profiles", { name: `Profile ${state.profiles.length + 1}` }));
       if (!p) return;

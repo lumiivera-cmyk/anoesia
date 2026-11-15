@@ -3,7 +3,7 @@
  * under `/api/`. Start it with `bun start`.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { parseCards } from "./cards.ts";
 import { loadConfig, type Config } from "./config.ts";
@@ -13,7 +13,7 @@ import { addressOf, cookieFor, isPublicPath, Login, overHttps, tokenOf } from ".
 import { ApiError, CancelledError, createChatCompletion, listModels, type ApiOptions } from "./nanogpt.ts";
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
-import { Store } from "./store.ts";
+import { PHOTO_TYPES, Store } from "./store.ts";
 import type { Message, ProviderId } from "./types.ts";
 
 export interface App {
@@ -29,6 +29,8 @@ export function createApp(config: Config): App {
   const db = openDatabase(join(config.dataDir, "anoesia.db"));
   const store = new Store(db);
   const login = new Login(config.dataDir);
+  const photoDir = join(config.dataDir, "photos");
+  mkdirSync(photoDir, { recursive: true });
   const api: ApiOptions = { apiKey: config.apiKey, baseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs, vertex: config.vertex };
   /** The reply being written in each chat, so Stop can end it and a second one can't start. */
   const running = new Map<string, AbortController>();
@@ -97,7 +99,24 @@ export function createApp(config: Config): App {
     let p: string[] | undefined;
 
     if (path === "/api/state" && method === "GET") {
-      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey), macros: KNOWN_MACROS });
+      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey), macros: KNOWN_MACROS, photos: store.photos() });
+    }
+
+    // Background photos: the image itself as the body, its name, tint and framing in the query.
+    if (path === "/api/photos" && method === "POST") {
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.length > MAX_PHOTO_BYTES) throw new ValidationError("That photo is over 15 MB. Try a smaller one.");
+      const ext = imageType(bytes);
+      if (!ext) throw new ValidationError("That isn't a JPEG, PNG or WebP image.");
+      const q = url.searchParams;
+      const photo = store.addPhoto({ name: q.get("name"), ext, tint: q.get("tint"), position: q.get("position") });
+      await Bun.write(join(photoDir, `${photo.id}.${ext}`), bytes);
+      return json(photo);
+    }
+    if ((p = m("/api/photos/:id")) && method === "DELETE") {
+      const { ext } = store.deletePhoto(p[0]!);
+      rmSync(join(photoDir, `${p[0]}.${ext}`), { force: true });
+      return json({ ok: true, settings: store.settings() });
     }
     if (path === "/api/settings" && method === "PATCH") return json(store.updateSettings(await body()));
 
@@ -247,6 +266,12 @@ export function createApp(config: Config): App {
       const gate = await loginGate(request, url);
       if (gate) return gate;
       if (url.pathname.startsWith("/api/")) return await route(request, url);
+      const media = /^\/media\/([\w-]+)\.(jpg|png|webp)$/.exec(url.pathname);
+      if (media) {
+        const file = Bun.file(join(photoDir, `${media[1]}.${media[2]}`));
+        if (!(await file.exists())) throw new NotFoundError("photo");
+        return new Response(file, { headers: { "Content-Type": PHOTO_TYPES[media[2]!]!, "Cache-Control": "private, max-age=31536000, immutable" } });
+      }
       return await staticFile(config.publicDir, url.pathname);
     } catch (error) {
       const status = error instanceof NotFoundError ? 404 : error instanceof ValidationError ? 400 : error instanceof ApiError ? 502 : 500;
@@ -262,6 +287,16 @@ function errorMessage(error: unknown): string {
   if (error instanceof CancelledError) return "Stopped.";
   if (error instanceof NotFoundError || error instanceof ValidationError || error instanceof ApiError) return error.message;
   return "Something went wrong on the server. The details are in the server's log.";
+}
+
+const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+
+/** A photo's type from its first bytes, not from what the browser says it is. */
+function imageType(b: Uint8Array): "jpg" | "png" | "webp" | null {
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpg";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "png";
+  if (String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP") return "webp";
+  return null;
 }
 
 function json(value: unknown, status = 200): Response {

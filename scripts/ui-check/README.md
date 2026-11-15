@@ -15,7 +15,9 @@ sizes, it records:
 
 `dev.ts` starts the app on port 4950 with a throwaway data folder, seeded
 from `test/fixtures/sample-cards.md`, and a stand-in for nanoGPT, so
-nothing real is used or changed. Stop anything else on 4950 first.
+nothing real is used or changed. Set `PHOTO` to an image file to have it
+uploaded as the background, so the checks run over a photo (the worst case
+for contrast). Stop anything else on 4950 first.
 
 It needs Node with Playwright and Chromium, Bun, axe-core
 (`npm pack axe-core && tar xzf axe-core-*.tgz -C /tmp/axe`), and Python 3

@@ -32,5 +32,11 @@ if (!process.env.EMPTY) {
   for (const t of ["*Hana knocks on the green room door.*", "Is this a bad time?", "I brought the new setlist."]) await call("POST", `/api/chats/${chat.id}/send`, { content: t });
   await call("POST", `/api/chats/${chat.id}/regenerate`, {});
   await call("POST", "/api/chats", { name: "Night market", cast: [id("The Night Market"), me.id, id("Bo")] });
+  // A background photo, if you point PHOTO at one (none are in the repo).
+  if (process.env.PHOTO) {
+    const bytes = readFileSync(process.env.PHOTO);
+    const photo = await (await app.fetch(new Request("http://127.0.0.1/api/photos?name=street&tint=%23111A26&position=50%25%2038%25", { method: "POST", body: bytes }))).json() as any;
+    await call("PATCH", "/api/settings", { background: { photo: photo.id } });
+  }
 }
 console.log("ready", dir);
