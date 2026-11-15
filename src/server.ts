@@ -13,12 +13,17 @@ import { addressOf, cookieFor, isPublicPath, Login, overHttps, tokenOf } from ".
 import { ApiError, CancelledError, createChatCompletion, listModels, type ApiOptions } from "./nanogpt.ts";
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
+import { runTurn } from "./agent.ts";
+import { AgentStore } from "./agentstore.ts";
+import { compactDiff, diff } from "./diff.ts";
+import { ConflictError, Workspace } from "./workspace.ts";
 import { PHOTO_TYPES, Store } from "./store.ts";
-import type { Message, ProviderId } from "./types.ts";
+import type { AgentEdit, Message, ProviderId } from "./types.ts";
 
 export interface App {
   fetch: (request: Request) => Promise<Response>;
   store: Store;
+  agent: AgentStore;
   close: () => void;
 }
 
@@ -28,6 +33,9 @@ export function createApp(config: Config): App {
   mkdirSync(config.dataDir, { recursive: true });
   const db = openDatabase(join(config.dataDir, "anoesia.db"));
   const store = new Store(db);
+  const agent = new AgentStore(db);
+  const ws = new Workspace(store, agent);
+  const agentRunning = new Map<string, AbortController>();
   const login = new Login(config.dataDir);
   const photoDir = join(config.dataDir, "photos");
   mkdirSync(photoDir, { recursive: true });
@@ -74,6 +82,19 @@ export function createApp(config: Config): App {
     const blocks = store.blocks(chatId);
     const cards = new Map(store.cards().map((c) => [c.id, c]));
     return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), vars: store.vars(chatId), globals: store.vars("global") });
+  }
+
+  function editView(e: AgentEdit) {
+    const path = e.target.startsWith("file:") ? ws.displayFilePath(e.target.slice(5)) : e.path;
+    return { ...e, path, diff: compactDiff(diff(e.before ?? "", e.after ?? "")) };
+  }
+
+  function sessionView(id: string) {
+    return { session: agent.session(id), messages: agent.messages(id), edits: agent.edits({ sessionId: id }).map(editView), busy: agentRunning.has(id) };
+  }
+
+  function filesView() {
+    return agent.files().map((f) => ({ path: f.path, display: ws.displayFilePath(f.path), size: f.content.length, updatedAt: f.updatedAt }));
   }
 
   function chatView(chatId: string) {
@@ -201,6 +222,54 @@ export function createApp(config: Config): App {
       return json({ ok: true });
     }
 
+    // The agent: its sessions, messages, tools, files and reversible change log.
+    if (path === "/api/agent" && method === "GET") return json({ sessions: agent.sessions(), files: filesView() });
+    if (path === "/api/agent/sessions" && method === "POST") return json(agent.createSession(await body()));
+    if ((p = m("/api/agent/sessions/:id"))) {
+      if (method === "GET") return json(sessionView(p[0]!));
+      if (method === "PATCH") return json(agent.updateSession(p[0]!, await body()));
+      if (method === "DELETE") return (agent.deleteSession(p[0]!), json({ ok: true }));
+    }
+    if ((p = m("/api/agent/sessions/:id/send")) && method === "POST") {
+      const id = p[0]!;
+      const b = await body();
+      agent.session(id);
+      if (agentRunning.has(id)) throw new ValidationError("The agent is still working on your last message.");
+      const controller = new AbortController();
+      agentRunning.set(id, controller);
+      try {
+        await runTurn({ store, agent, ws, api }, { sessionId: id, text: typeof b.content === "string" ? b.content : "", chatId: typeof b.chatId === "string" ? b.chatId : null, signal: controller.signal });
+      } catch (error) {
+        if (error instanceof ValidationError && !agent.messages(id).length) throw error;
+        return json({ ...sessionView(id), busy: false, error: errorMessage(error) });
+      } finally {
+        agentRunning.delete(id);
+      }
+      return json(sessionView(id));
+    }
+    if ((p = m("/api/agent/sessions/:id/stop")) && method === "POST") {
+      agentRunning.get(p[0]!)?.abort();
+      return json({ ok: true });
+    }
+    if (path === "/api/agent/edits" && method === "GET") return json(agent.edits({ limit: Number(url.searchParams.get("limit")) || 200 }).map(editView));
+    if ((p = m("/api/agent/edits/:id/revert")) && method === "POST") return json(editView(ws.revert(p[0]!, (await body()).force === true)));
+    if ((p = m("/api/agent/turns/:id/revert")) && method === "POST") return json(ws.revertTurn(p[0]!, (await body()).force === true).map(editView));
+    if (path === "/api/agent/files") {
+      if (method === "GET") {
+        const filePath = url.searchParams.get("path");
+        if (!filePath) return json(filesView());
+        const file = agent.file(filePath);
+        if (!file) throw new NotFoundError("file");
+        return json({ ...file, display: ws.displayFilePath(file.path) });
+      }
+      if (method === "PUT") {
+        const b = await body();
+        const file = agent.writeFile(b.path, b.content);
+        return json({ ...file, display: ws.displayFilePath(file.path) });
+      }
+      if (method === "DELETE") return (agent.deleteFile(url.searchParams.get("path") ?? ""), json({ ok: true }));
+    }
+
     // Messages
     if ((p = m("/api/messages/:id"))) {
       if (method === "PATCH") {
@@ -274,18 +343,18 @@ export function createApp(config: Config): App {
       }
       return await staticFile(config.publicDir, url.pathname);
     } catch (error) {
-      const status = error instanceof NotFoundError ? 404 : error instanceof ValidationError ? 400 : error instanceof ApiError ? 502 : 500;
+      const status = error instanceof NotFoundError ? 404 : error instanceof ConflictError ? 409 : error instanceof ValidationError ? 400 : error instanceof ApiError ? 502 : 500;
       if (status === 500) console.error(error);
       return json({ error: errorMessage(error) }, status);
     }
   }
 
-  return { fetch, store, close: () => db.close() };
+  return { fetch, store, agent, close: () => db.close() };
 }
 
 function errorMessage(error: unknown): string {
   if (error instanceof CancelledError) return "Stopped.";
-  if (error instanceof NotFoundError || error instanceof ValidationError || error instanceof ApiError) return error.message;
+  if (error instanceof NotFoundError || error instanceof ConflictError || error instanceof ValidationError || error instanceof ApiError) return error.message;
   return "Something went wrong on the server. The details are in the server's log.";
 }
 
