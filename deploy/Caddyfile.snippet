@@ -1,0 +1,35 @@
+# Add this to /etc/caddy/Caddyfile on the Amaedori server, next to
+# Amaedori's own block, with your Anoesia address in place of RP_DOMAIN
+# (for example rp.amaedori.li). Then: systemctl reload caddy
+#
+# Caddy gets the HTTPS certificate on its own once the address's DNS
+# record points at the server.
+
+RP_DOMAIN {
+	encode zstd gzip
+
+	request_body {
+		max_size 20MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:4950 {
+		flush_interval -1
+	}
+}
+
+# Or under a path of Amaedori's address instead (yourdomain/rp): put this
+# inside Amaedori's block, above its reverse_proxy line.
+#
+#	redir /rp /rp/
+#	handle_path /rp/* {
+#		reverse_proxy 127.0.0.1:4950
+#	}

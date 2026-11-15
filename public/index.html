@@ -1,0 +1,182 @@
+<!doctype html>
+<!--
+  Anoesia's single page.
+
+    .app
+      .sidebar        chats, and buttons for cards and settings
+      .scrim          behind the sidebar when it slides over on a phone
+      .chat-view      the open chat: header (name, cast), messages, composer
+    dialogs           cards, card editor, import, chat settings, settings, preview
+
+  Behaviour is in js/ (main.js starts it), styling in style.css.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Anoesia</title>
+    <meta name="theme-color" content="#1e1f22" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="js/main.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar surface" id="sidebar">
+        <header class="sidebar-header">
+          <span class="app-name">Anoesia</span>
+          <button type="button" class="icon-button" id="new-chat" title="New chat" aria-label="New chat">＋</button>
+        </header>
+        <nav class="chat-list" id="chat-list" aria-label="Chats"></nav>
+        <footer class="sidebar-footer">
+          <button type="button" class="button" id="open-cards">Cards</button>
+          <button type="button" class="button" id="open-settings">Settings</button>
+        </footer>
+      </aside>
+      <div class="scrim" id="scrim" hidden></div>
+
+      <main class="chat-view">
+        <header class="chat-header surface">
+          <button type="button" class="icon-button menu-button" id="menu" aria-label="Chats">☰</button>
+          <div class="chat-title">
+            <h1 id="chat-name">No chat open</h1>
+            <div class="cast-line" id="cast-line"></div>
+          </div>
+          <button type="button" class="button" id="open-preview" title="See exactly what the model gets next">Preview</button>
+          <button type="button" class="icon-button" id="open-chat-settings" title="Chat settings" aria-label="Chat settings">⚙</button>
+        </header>
+
+        <div class="messages" id="messages" aria-live="polite"></div>
+
+        <div class="error-bar" id="error-bar" hidden></div>
+
+        <form class="composer surface" id="composer">
+          <textarea id="composer-input" rows="1" placeholder="Write your turn…" aria-label="Your message"></textarea>
+          <div class="composer-buttons">
+            <button type="button" class="button" id="stop" hidden>Stop</button>
+            <button type="submit" class="button primary" id="send">Send</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <!-- Cards: your cards and persona, with import. -->
+    <dialog class="dialog surface wide" id="cards-dialog">
+      <header class="dialog-header">
+        <h2>Cards</h2>
+        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="dialog-body">
+        <div class="row">
+          <button type="button" class="button primary" id="new-card">New card</button>
+          <button type="button" class="button" id="open-import">Import markdown</button>
+        </div>
+        <ul class="card-list" id="card-list"></ul>
+      </div>
+    </dialog>
+
+    <!-- One card's fields. -->
+    <dialog class="dialog surface wide" id="card-dialog">
+      <form method="dialog" id="card-form">
+        <header class="dialog-header">
+          <h2 id="card-dialog-title">Card</h2>
+          <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+        </header>
+        <div class="dialog-body">
+          <label class="field">Name <input id="card-name" required maxlength="200" /></label>
+          <label class="check"><input type="checkbox" id="card-persona" /> This is me (my persona: fills <code>{{user}}</code>)</label>
+          <label class="check"><input type="checkbox" id="card-character" /> A character (listed in <code>{{cast}}</code>). Untick for a world, place or faction.</label>
+          <div id="card-fields"></div>
+          <details class="advanced">
+            <summary>Advanced: custom fields</summary>
+            <div id="card-custom-fields"></div>
+            <button type="button" class="button" id="add-custom-field">Add a field</button>
+          </details>
+        </div>
+        <footer class="dialog-footer">
+          <button type="button" class="button danger" id="delete-card">Delete card</button>
+          <span class="spacer"></span>
+          <span class="muted small" id="card-tokens"></span>
+          <button type="submit" class="button primary">Save</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- Import cards from markdown. -->
+    <dialog class="dialog surface wide" id="import-dialog">
+      <header class="dialog-header">
+        <h2>Import cards</h2>
+        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="dialog-body">
+        <p class="muted small">
+          Paste one or more cards. Each starts with <code># Name</code>; each <code>## Heading</code> under it is a field.
+          <code>Description</code>, <code>Advanced Description</code> and <code>System Prompt</code> fill the usual fields, and any
+          other heading becomes a custom field.
+        </p>
+        <textarea id="import-text" rows="12" placeholder="# Rumi Kang&#10;## Description&#10;…"></textarea>
+        <label class="file-pick">Or pick a .md file <input type="file" id="import-file" accept=".md,.markdown,.txt,text/markdown,text/plain" /></label>
+        <div id="import-preview"></div>
+      </div>
+      <footer class="dialog-footer">
+        <span class="spacer"></span>
+        <button type="button" class="button primary" id="import-go" disabled>Import</button>
+      </footer>
+    </dialog>
+
+    <!-- The open chat's name and cast. -->
+    <dialog class="dialog surface" id="chat-dialog">
+      <header class="dialog-header">
+        <h2>Chat settings</h2>
+        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="dialog-body">
+        <label class="field">Name <input id="chat-name-input" maxlength="200" /></label>
+        <h3>Cast</h3>
+        <p class="muted small">The cards in this chat, in the order they go into the prompt. The last one sits closest to the chat.</p>
+        <ol class="cast-list" id="cast-list"></ol>
+        <label class="field">Add a card <select id="cast-add"></select></label>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="button danger" id="delete-chat">Delete chat</button>
+        <span class="spacer"></span>
+      </footer>
+    </dialog>
+
+    <!-- App settings: connections and the main prompt. -->
+    <dialog class="dialog surface wide" id="settings-dialog">
+      <header class="dialog-header">
+        <h2>Settings</h2>
+        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="dialog-body">
+        <h3>Connections</h3>
+        <p class="muted small" id="key-status"></p>
+        <label class="field">Writes replies <select id="rp-profile"></select></label>
+        <div id="profile-list"></div>
+        <button type="button" class="button" id="new-profile">New profile</button>
+
+        <h3>Main prompt</h3>
+        <p class="muted small">The first system block. Macros: <code>{{user}}</code>, <code>{{char}}</code>, <code>{{cast}}</code>, <code>{{date}}</code>, <code>{{time}}</code>, <code>{{// a comment}}</code>.</p>
+        <textarea id="main-prompt" rows="5"></textarea>
+        <div class="row end"><button type="button" class="button" id="reset-main-prompt">Reset</button><button type="button" class="button primary" id="save-main-prompt">Save</button></div>
+      </div>
+    </dialog>
+
+    <!-- Exactly what the model gets next. -->
+    <dialog class="dialog surface wide" id="preview-dialog">
+      <header class="dialog-header">
+        <h2>Preview</h2>
+        <button type="button" class="icon-button" data-close aria-label="Close">✕</button>
+      </header>
+      <div class="dialog-body">
+        <p class="muted small" id="preview-summary"></p>
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" data-preview-tab="blocks">Blocks</button>
+          <button type="button" class="tab" data-preview-tab="sent">As sent</button>
+        </div>
+        <div id="preview-body"></div>
+      </div>
+    </dialog>
+  </body>
+</html>
