@@ -9,7 +9,8 @@
  */
 
 import { $, api, attempt, escapeHtml, formatText, loadState, state } from "./core.js";
-import { openChat, renderChatList } from "./chat.js";
+import { openChat } from "./chat.js";
+import { renderSide } from "./side.js";
 
 const agent = {
   open: false,
@@ -278,7 +279,7 @@ async function send(text) {
 /** The agent may have changed cards, prompts or messages: show them as they are now. */
 async function refreshApp() {
   await loadState();
-  renderChatList();
+  renderSide();
   if (state.chatId) await openChat(state.chatId);
 }
 
@@ -303,6 +304,7 @@ async function revert(path, label) {
 
 export function wireAgent() {
   $("open-agent").addEventListener("click", () => toggleAgent());
+  $("open-agent-phone").addEventListener("click", () => toggleAgent());
   $("agent-close").addEventListener("click", () => toggleAgent(false));
   $("agent-new").addEventListener("click", newSession);
   $("agent-session").addEventListener("change", (e) => openSession(e.target.value || null));

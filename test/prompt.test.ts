@@ -10,6 +10,8 @@ function card(name: string, fields: [string, string][], extra: Partial<Card> = {
     name,
     isPersona: false,
     isCharacter: true,
+    colour: "violet",
+    customColour: "",
     fields: fields.map(([key, content], i) => ({ id: `${name}-${key}`, key: key === "voice" ? "custom" : (key as "description"), title: key === "voice" ? "Voice bank" : key, content, position: i })),
     createdAt: "",
     updatedAt: "",

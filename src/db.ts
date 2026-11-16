@@ -113,51 +113,62 @@ export const MIGRATIONS: string[] = [
   );
   `,
 
-  // 3: the agent. Its own files (notes, personality, a folder per chat),
-  // its sessions and their messages, and the log of every change it makes.
+  // 3: the agent. Its files, sessions, messages and change log.
   `
   CREATE TABLE agent_files (
-    path       TEXT PRIMARY KEY,           -- e.g. 'index.md', 'notes/rumi-draft.md', 'chats/<chat id>/notebook.md'
-    content    TEXT NOT NULL,
+    path TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-
   CREATE TABLE agent_sessions (
-    id         TEXT PRIMARY KEY,
-    title      TEXT NOT NULL,
-    chat_id    TEXT REFERENCES chats(id) ON DELETE SET NULL,
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-
   CREATE TABLE agent_messages (
-    id           TEXT PRIMARY KEY,
-    session_id   TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
-    seq          INTEGER NOT NULL,
-    turn_id      TEXT NOT NULL,
-    role         TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
-    content      TEXT NOT NULL DEFAULT '',
-    tool_calls   TEXT,                     -- JSON, for an assistant message that called tools
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    turn_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+    content TEXT NOT NULL DEFAULT '',
+    tool_calls TEXT,
     tool_call_id TEXT,
-    tool_name    TEXT,
-    created_at   TEXT NOT NULL
+    tool_name TEXT,
+    created_at TEXT NOT NULL
   );
   CREATE INDEX agent_messages_session ON agent_messages(session_id, seq);
-
-  -- Kept when a session is deleted: the changes happened all the same.
   CREATE TABLE agent_edits (
-    id          TEXT PRIMARY KEY,
-    session_id  TEXT NOT NULL,
-    turn_id     TEXT NOT NULL,
-    path        TEXT NOT NULL,
-    target      TEXT NOT NULL,
-    before      TEXT,
-    after       TEXT,
-    meta        TEXT,
-    created_at  TEXT NOT NULL,
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    target TEXT NOT NULL,
+    before TEXT,
+    after TEXT,
+    meta TEXT,
+    created_at TEXT NOT NULL,
     reverted_at TEXT
   );
   CREATE INDEX agent_edits_time ON agent_edits(created_at);
+  `,
+  // 4: card colours (a preset name or a hex), and the last custom one picked.
+  `
+  ALTER TABLE cards ADD COLUMN colour TEXT NOT NULL DEFAULT 'violet';
+  ALTER TABLE cards ADD COLUMN custom_colour TEXT NOT NULL DEFAULT '';
+  `,
+  // 5: background photos you upload (the files are in the data folder's photos/).
+  `
+  CREATE TABLE photos (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    ext        TEXT NOT NULL,
+    tint       TEXT NOT NULL,
+    position   TEXT NOT NULL DEFAULT '50% 50%',
+    created_at TEXT NOT NULL
+  );
   `,
 ];
 
@@ -166,11 +177,49 @@ export function openDatabase(path: string): Database {
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
   const version = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  for (let i = version; i < MIGRATIONS.length; i++) {
+  // The agent and lacquer branches both shipped a migration numbered 3
+  // independently. Older local databases can therefore have either feature
+  // set at user_version 3 or 4. Run only the shared foundation migrations
+  // here, then reconcile the optional tables/columns by inspecting the schema.
+  // This makes upgrades safe whichever branch created the existing database.
+  for (let i = version; i < Math.min(MIGRATIONS.length, 2); i++) {
     db.transaction(() => {
       db.exec(MIGRATIONS[i]!);
       db.exec(`PRAGMA user_version = ${i + 1}`);
     })();
   }
+  db.transaction(() => {
+    const columns = new Set((db.query("PRAGMA table_info(cards)").all() as { name: string }[]).map((c) => c.name));
+    if (!columns.has("colour")) db.exec("ALTER TABLE cards ADD COLUMN colour TEXT NOT NULL DEFAULT 'violet'");
+    if (!columns.has("custom_colour")) db.exec("ALTER TABLE cards ADD COLUMN custom_colour TEXT NOT NULL DEFAULT ''");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS photos (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, ext TEXT NOT NULL, tint TEXT NOT NULL,
+        position TEXT NOT NULL DEFAULT '50% 50%', created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_files (
+        path TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL,
+        chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL, turn_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+        content TEXT NOT NULL DEFAULT '', tool_calls TEXT, tool_call_id TEXT, tool_name TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_messages_session ON agent_messages(session_id, seq);
+      CREATE TABLE IF NOT EXISTS agent_edits (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, path TEXT NOT NULL,
+        target TEXT NOT NULL, before TEXT, after TEXT, meta TEXT, created_at TEXT NOT NULL, reverted_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS agent_edits_time ON agent_edits(created_at);
+    `);
+    db.exec(`PRAGMA user_version = ${Math.max(version, 5)}`);
+  })();
   return db;
 }

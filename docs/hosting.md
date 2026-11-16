@@ -69,5 +69,6 @@ cd /opt/anoesia && sudo -u anoesia git pull && systemctl restart anoesia
 
 ## Backups
 
-Everything is in `/opt/anoesia/data/anoesia.db`. Amaedori's nightly backup
+Everything is in `/opt/anoesia/data`: the database (`anoesia.db`) and the
+background photos you've uploaded (`photos/`). Amaedori's nightly backup
 only covers Amaedori; copying Anoesia's data folder into it comes later.

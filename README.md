@@ -5,9 +5,9 @@ smoothly in narrator-style scenes, with turns that leave room to respond.
 The design is in the project's design doc; this README is what works today.
 
 Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
-(the nanoGPT and Vertex AI connection, the login, the look) rather than forked.
+(the nanoGPT and Vertex AI connection, the login) rather than forked.
 
-## What works (steps 1 to 3a of the v1 plan)
+## What works (steps 1 to 3a of the v1 plan, in the lacquer design)
 
 - **Chats**, each with a **cast**: the cards in it, in the order they go into
   the prompt. Reorder them in chat settings.
@@ -56,9 +56,21 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   list or revert its changes. It changes your things only when you ask.
   Every change is logged with its text before and after, shown as a diff
   under the turn that made it, and can be reverted one at a time or a whole
-  turn at once (combing a chat is one turn). A revert never silently undoes
-  something you changed after the agent did. Sessions are kept.
+  turn at once. Sessions are kept.
+
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
+
+- **The lacquer design**: black lacquer panels over a night-city photo, the
+  same on phone and desktop. In settings, add your own photos (they're kept
+  in the data folder, behind the login, and never in git), pick one or none, the
+  finish (roiro, tamenuri or shunkei), how much the photo tints the panels,
+  how dim it is and how much it shows through. "Back to readable" puts dim
+  and window back. Each card has a bead colour: violet, blue, pink or any
+  colour from the picker.
+- **The cards page**: every card by kind, its fields in send order (drag the
+  bumps, use the arrow keys, or tap them for move options), where it's used,
+  and what deleting it would take with it. Reordering a card's fields also
+  reorders its folder in every chat.
 
 A new chat's prompt starts as: main prompt, each cast card's fields in cast
 order, then the chat. A card you add to the cast later lands just before the
@@ -80,9 +92,24 @@ Then open <http://127.0.0.1:4950>. (Amaedori uses 4949, so both can run.)
 
 To run it on the Amaedori server, always up: [docs/hosting.md](docs/hosting.md).
 
+## The design
+
+`public/anoesia.css` is the design system from the design handoff, copied
+as is: tokens, glass and lacquer surfaces, beads, buttons, switches. The
+app's own layout is in `public/app.css`. No photos ship with the app: the
+design's six came from a wallpaper site with no licence to share them, so
+you upload your own in settings. Each photo's tint is worked out from its
+colours when it's added. The selenite
+theme is designed but not built yet.
+
+Not in this version, though designed: nudges (step 4).
+
 ## Developing
 
 ```sh
 bun test
 bun run typecheck
 ```
+
+To check the pages themselves (accessibility, every control, layout, touch
+size and contrast, at desktop and phone sizes): [scripts/ui-check](scripts/ui-check/README.md).
