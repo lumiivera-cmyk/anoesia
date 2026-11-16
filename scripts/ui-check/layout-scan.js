@@ -12,6 +12,7 @@
     const cs = getComputedStyle(el); return cs.visibility !== 'hidden' && cs.display !== 'none';
   };
   const inScroller = (el) => { for (let a = el.parentElement; a && a !== root; a = a.parentElement) { const o = getComputedStyle(a).overflowY; if (o === 'auto' || o === 'scroll') return true; } return false; };
+  const clippedByScroller = (el, r) => { for (let a = el.parentElement; a && a !== root; a = a.parentElement) { const o = getComputedStyle(a).overflowY; if (o === 'auto' || o === 'scroll') { const s = a.getBoundingClientRect(); return r.top < s.top - 0.5 || r.bottom > s.bottom + 0.5; } } return false; };
   const INTER = 'button, a[href], input, textarea, [role=switch], [role=tab], [role=menuitem], [tabindex="0"]';
   for (const el of root.querySelectorAll('*')) {
     if (!shown(el) || el.classList.contains('sr') || el.closest('.sr')) continue;
@@ -28,7 +29,9 @@
     // touch size by actual hit-testing: walk out from the centre until a tap would land on something else.
     // Counts ::after hit areas, .hit spans and wrapping labels; respects clipping and anything drawn on top.
     let hw = r.width, hh = r.height;
-    if (inter && W < 500) {
+    if (inter && W < 500 && clippedByScroller(el, r)) {
+      hw = hh = 99; // clipped by a scrollport: defer sizing until the target is fully in view
+    } else if (inter && W < 500) {
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
       const own = (x, y) => { const e = document.elementFromPoint(x, y);
         return !!e && (e === el || el.contains(e) || (e.tagName === 'LABEL' && (e.contains(el) || e.control === el))); };
