@@ -114,8 +114,13 @@ export const TOOL_SPECS: ToolSpec[] = [
   ),
   tool(
     "remember",
-    "Keep a note for later sessions: a preference, a decision, a fact about the story. Goes into agent/index.md (read at the start of every session), or a chat's notebook (agent/chats/<chat>/notebook.md).",
-    { note: str("The note, one line or a few."), heading: str("A section to put it under, e.g. 'Preferences'. Optional."), chat: str("Put it in this chat's notebook instead. Optional.") },
+    "Keep a note for later sessions: a preference, a decision, a fact about the story. Goes into agent/index.md (read at the start of every session), or a chat's notebook (agent/chats/<chat>/notebook.md, read by that chat's agent and never sent to the roleplay model). A chat's own agent writes to its chat's notebook unless global is set.",
+    {
+      note: str("The note, one line or a few."),
+      heading: str("A section to put it under, e.g. 'Preferences'. Optional."),
+      chat: str("Put it in this chat's notebook. Optional."),
+      global: bool("Put it in agent/index.md even from a chat's agent. Optional."),
+    },
     ["note"],
   ),
   tool("list_edits", "List your recent changes with their ids, newest first.", { limit: int("How many. Default 20.") }),
@@ -133,6 +138,8 @@ export interface ToolEnv {
   ctx: EditContext;
   /** The chat that's open, if any. */
   chatId: string | null;
+  /** Whose session: the main agent's, or a chat's own agent (whose notes go to that chat's notebook). */
+  scope?: "main" | "chat";
 }
 
 type Args = Record<string, unknown>;
@@ -304,12 +311,14 @@ const TOOLS: Record<string, (args: Args, env: ToolEnv) => ToolResult> = {
     const note = text(args.note, "note");
     if (!note.trim()) throw new Error("The note is empty.");
     const heading = typeof args.heading === "string" && args.heading.trim() ? args.heading : undefined;
-    const path = typeof args.chat === "string" && args.chat.trim() ? `agent/chats/${env.ws.findChat(args.chat).name}/notebook.md` : "agent/index.md";
+    const named = typeof args.chat === "string" && args.chat.trim() ? env.ws.findChat(args.chat) : null;
+    const chat = named ?? (env.scope === "chat" && args.global !== true && env.chatId ? env.ws.findChat(env.chatId) : null);
+    const path = chat ? `agent/chats/${chat.name}/notebook.md` : "agent/index.md";
     let current = "";
     try {
       current = env.ws.read(path).text;
     } catch {
-      current = typeof args.chat === "string" ? "# Notebook\n" : "# Notes\n";
+      current = chat ? "# Notebook\n" : "# Notes\n";
     }
     const edit = env.ws.write(path, appendUnder(current, heading, note), env.ctx);
     return { text: `Noted in ${edit.path}.`, edits: [edit] };

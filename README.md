@@ -7,7 +7,7 @@ The design is in the project's design doc; this README is what works today.
 Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 (the nanoGPT and Vertex AI connection, the login) rather than forked.
 
-## What works (steps 1 to 3a of the v1 plan, in the lacquer design)
+## What works (steps 1 to 3 of the v1 plan, in the lacquer design)
 
 - **Chats**, each with a **cast**: the cards in it, in the order they go into
   the prompt. Reorder them in chat settings.
@@ -57,6 +57,12 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   Every change is logged with its text before and after, shown as a diff
   under the turn that made it, and can be reverted one at a time or a whole
   turn at once. Sessions are kept.
+- **Each chat's own agent** ("<chat>'s agent" at the top of the agent panel):
+  the same tools, bound to one chat, with its own personality
+  (`agent/chats/<chat>/personality.md`, yours to rewrite) and a notebook for
+  the story (`notebook.md`), which it reads every turn and `remember` writes
+  to. The notebook is never sent to the roleplay model. It changes things only
+  when asked, like the main agent, and its sessions stay with its chat.
 
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
 

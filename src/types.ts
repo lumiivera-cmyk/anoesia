@@ -184,6 +184,8 @@ export type AgentApiMessage =
 export interface AgentSession {
   id: string;
   title: string;
+  /** `main`: the main agent. `chat`: the open chat's own agent, bound to `chatId`. */
+  scope: "main" | "chat";
   /** The chat that was open when you last wrote to it, or null. */
   chatId: string | null;
   createdAt: string;

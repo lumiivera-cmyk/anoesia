@@ -11,9 +11,11 @@ import { join } from "node:path";
 import { MIGRATIONS, openDatabase } from "../src/db.ts";
 
 const dirs: string[] = [];
+/** The real migrations; tests that add one take it off again. */
+const REAL = MIGRATIONS.length;
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  if (MIGRATIONS.length > 5) MIGRATIONS.length = 5;
+  if (MIGRATIONS.length > REAL) MIGRATIONS.length = REAL;
 });
 
 function path() {
@@ -30,7 +32,7 @@ test("a migration added after 5 runs, on a new database and on an existing one",
   MIGRATIONS.push("CREATE TABLE later_thing (x TEXT);");
   const db = openDatabase(file);
   expect(tables(db)).toContain("later_thing");
-  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
+  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(REAL + 1);
   db.close();
   // and not twice
   openDatabase(file).close();
@@ -46,5 +48,17 @@ test("a database from the lacquer branch (colours and photos at 4) gets the agen
   old.close();
   const db = openDatabase(file);
   expect(tables(db)).toEqual(expect.arrayContaining(["agent_files", "agent_sessions", "agent_messages", "agent_edits", "photos"]));
+  db.close();
+});
+
+test("a database at 5 (the agent and lacquer merged) gets the agent sessions' scope (6)", () => {
+  const file = path();
+  const old = openDatabase(file);
+  old.exec("ALTER TABLE agent_sessions DROP COLUMN scope; PRAGMA user_version = 5");
+  old.exec("INSERT INTO agent_sessions (id, title, created_at, updated_at) VALUES ('s', 'Old', 'x', 'x')");
+  old.close();
+  const db = openDatabase(file);
+  expect((db.query("SELECT scope FROM agent_sessions WHERE id = 's'").get() as { scope: string }).scope).toBe("main");
+  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
   db.close();
 });

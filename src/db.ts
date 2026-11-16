@@ -170,6 +170,12 @@ export const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+
+  // 6: each chat's own agent. A session is the main agent's, or bound to
+  // one chat (its sub-agent, with its own personality and notebook).
+  `
+  ALTER TABLE agent_sessions ADD COLUMN scope TEXT NOT NULL DEFAULT 'main' CHECK (scope IN ('main', 'chat'));
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

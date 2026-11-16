@@ -152,6 +152,10 @@
         <button type="button" class="btn raised press" id="agent-new">New</button>
         <button type="button" class="ghost press ib" id="agent-close" aria-label="Close the agent">✕</button>
       </header>
+      <div class="seg sunk agent-modes" role="tablist" aria-label="Which agent">
+        <button type="button" class="agent-mode active" data-agent-mode="main" role="tab" aria-selected="true">Main agent</button>
+        <button type="button" class="agent-mode" data-agent-mode="chat" role="tab" aria-selected="false">A chat's agent</button>
+      </div>
       <div class="seg sunk agent-tabs" role="tablist" aria-label="Agent views">
         <button type="button" class="tab active" data-agent-tab="chat" role="tab" aria-selected="true">Chat</button>
         <button type="button" class="tab" data-agent-tab="changes" role="tab" aria-selected="false">Changes</button>

@@ -23,6 +23,14 @@ You help write and tune roleplay in Anoesia: the cards, the prompts, and the cha
 `,
 };
 
+/** The starting personality of a chat's own agent. */
+export function chatPersonality(chatName: string): string {
+  return `# Personality
+
+You are the agent for the chat "${chatName}". You know this story closely: its cast, what has happened, and the notebook you keep for it. Help with this chat first; the rest of Anoesia is there when it's needed. Talk plainly and briefly, and say when you think something won't work, and why.
+`;
+}
+
 /** Where a file's path may not go: outside the folder, or empty parts. */
 export function cleanFilePath(raw: unknown): string {
   if (typeof raw !== "string") throw new ValidationError("A file's path must be text.");
@@ -82,6 +90,12 @@ export class AgentStore {
     return (this.db.query("SELECT * FROM agent_sessions ORDER BY updated_at DESC").all() as Row[]).map(toSession);
   }
 
+  /** A chat's agent starts with its own personality file, which you can rewrite. */
+  ensureChatFiles(chatId: string, chatName: string): void {
+    const path = `chats/${chatId}/personality.md`;
+    if (!this.file(path)) this.writeFile(path, chatPersonality(chatName));
+  }
+
   session(id: string): AgentSession {
     const row = this.db.query("SELECT * FROM agent_sessions WHERE id = ?").get(id) as Row | null;
     if (!row) throw new NotFoundError("agent session");
@@ -92,14 +106,22 @@ export class AgentStore {
     const id = newId();
     const at = now();
     const title = typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 200) : "New session";
-    this.db.query("INSERT INTO agent_sessions (id, title, chat_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(id, title, this.chatIdOf(raw.chatId), at, at);
+    const scope = raw.scope === "chat" ? "chat" : "main";
+    const chatId = this.chatIdOf(raw.chatId);
+    if (scope === "chat" && !chatId) throw new ValidationError("A chat's agent needs a chat. Open one first.");
+    this.db.query("INSERT INTO agent_sessions (id, title, scope, chat_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, title, scope, chatId, at, at);
+    if (scope === "chat") {
+      const name = (this.db.query("SELECT name FROM chats WHERE id = ?").get(chatId) as { name: string }).name;
+      this.ensureChatFiles(chatId!, name);
+    }
     return this.session(id);
   }
 
   updateSession(id: string, raw: Row): AgentSession {
     const s = this.session(id);
     const title = raw.title !== undefined ? (typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 200) : s.title) : s.title;
-    const chatId = raw.chatId !== undefined ? this.chatIdOf(raw.chatId) : s.chatId;
+    // A chat's agent stays with its chat; the main agent follows the open one.
+    const chatId = s.scope === "chat" ? s.chatId : raw.chatId !== undefined ? this.chatIdOf(raw.chatId) : s.chatId;
     this.db.query("UPDATE agent_sessions SET title = ?, chat_id = ?, updated_at = ? WHERE id = ?").run(title, chatId, now(), id);
     return this.session(id);
   }
@@ -168,7 +190,7 @@ function toFile(r: Row): AgentFile {
 }
 
 function toSession(r: Row): AgentSession {
-  return { id: r.id as string, title: r.title as string, chatId: (r.chat_id as string | null) ?? null, createdAt: r.created_at as string, updatedAt: r.updated_at as string };
+  return { id: r.id as string, title: r.title as string, scope: r.scope === "chat" ? "chat" : "main", chatId: (r.chat_id as string | null) ?? null, createdAt: r.created_at as string, updatedAt: r.updated_at as string };
 }
 
 function toMessage(r: Row): AgentMessage {

@@ -2,6 +2,9 @@
  * The agent panel: talk to the agent, see what it did (each change as a
  * diff, with revert), and read or edit its files.
  *
+ * Two agents: the main one, and the open chat's own (its own personality
+ * and notebook, in agent/chats/<chat>/). "Main" / "This chat" switches.
+ *
  *   Chat     the session: your messages, its replies, each tool it used,
  *            and the changes each turn made, with "Revert" and "Revert all"
  *   Changes  every change the agent has made, newest first
@@ -9,11 +12,13 @@
  */
 
 import { $, api, attempt, escapeHtml, formatText, loadState, state } from "./core.js";
-import { openChat } from "./chat.js";
+import { openChat, renderChat as renderRoleplay } from "./chat.js";
 import { renderSide } from "./side.js";
 
 const agent = {
   open: false,
+  /** "main" or "chat": whose sessions the panel shows. */
+  mode: "main",
   tab: "chat",
   sessions: [],
   sessionId: null,
@@ -24,11 +29,38 @@ const agent = {
   edits: [],
 };
 
-let lastSession = "";
+/** The last session used, per agent ("main", or a chat's id). */
+let lastSessions = {};
 try {
-  lastSession = localStorage.getItem("anoesia.agentSession") ?? "";
+  lastSessions = JSON.parse(localStorage.getItem("anoesia.agentSessions") ?? "{}") ?? {};
+  agent.mode = localStorage.getItem("anoesia.agentMode") === "chat" ? "chat" : "main";
 } catch {
   // private mode
+}
+
+/** Which agent the panel is on: "main", or the open chat's id. */
+function owner() {
+  return agent.mode === "chat" ? state.chatId : "main";
+}
+
+function visibleSessions() {
+  return agent.sessions.filter((s) => (agent.mode === "chat" ? s.scope === "chat" && s.chatId === state.chatId : s.scope !== "chat"));
+}
+
+function remember(key, value) {
+  try {
+    localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
+  } catch {
+    // fine
+  }
+}
+
+/** Show the session last used with this agent, or none yet. */
+async function pickSession() {
+  if (agent.mode === "chat" && !state.chatId) agent.mode = "main";
+  const list = visibleSessions();
+  const pick = list.find((s) => s.id === lastSessions[owner()]) ?? list[0];
+  await openSession(pick?.id ?? null);
 }
 
 // ----------------------------------------------------------------- open
@@ -39,11 +71,8 @@ export async function toggleAgent(force) {
   document.body.classList.toggle("agent-open", agent.open);
   if (!agent.open) return;
   await refreshList();
-  if (!agent.sessionId) {
-    const pick = agent.sessions.find((s) => s.id === lastSession) ?? agent.sessions[0];
-    if (pick) await openSession(pick.id);
-    else renderAll();
-  } else renderAll();
+  if (!agent.sessionId) await pickSession();
+  else renderAll();
   $("agent-input").focus();
 }
 
@@ -56,17 +85,16 @@ async function refreshList() {
 
 async function openSession(id) {
   agent.sessionId = id;
-  try {
-    localStorage.setItem("anoesia.agentSession", id ?? "");
-  } catch {
-    // fine
+  if (id) {
+    lastSessions[owner()] = id;
+    remember("anoesia.agentSessions", lastSessions);
   }
   agent.view = id ? await attempt(() => api("GET", `/api/agent/sessions/${id}`)) : null;
   renderAll();
 }
 
 async function newSession() {
-  const s = await attempt(() => api("POST", "/api/agent/sessions", { chatId: state.chatId }));
+  const s = await attempt(() => api("POST", "/api/agent/sessions", { chatId: state.chatId, scope: agent.mode }));
   if (!s) return;
   await refreshList();
   await openSession(s.id);
@@ -76,8 +104,18 @@ async function newSession() {
 // --------------------------------------------------------------- render
 
 function renderAll() {
+  const chatName = state.chat?.name ?? "";
+  for (const b of document.querySelectorAll("[data-agent-mode]")) {
+    b.classList.toggle("active", b.dataset.agentMode === agent.mode);
+    b.setAttribute("aria-selected", String(b.dataset.agentMode === agent.mode));
+    if (b.dataset.agentMode === "chat") {
+      b.disabled = !state.chatId;
+      b.textContent = state.chatId ? `${chatName}'s agent` : "A chat's agent";
+      b.title = state.chatId ? `This chat's own agent: its own personality and notebook` : "Open a chat first";
+    }
+  }
   $("agent-session").innerHTML =
-    agent.sessions.map((s) => `<option value="${s.id}" ${s.id === agent.sessionId ? "selected" : ""}>${escapeHtml(s.title)}</option>`).join("") ||
+    visibleSessions().map((s) => `<option value="${s.id}" ${s.id === agent.sessionId ? "selected" : ""}>${escapeHtml(s.title)}</option>`).join("") ||
     `<option value="">No sessions yet</option>`;
   for (const t of document.querySelectorAll("[data-agent-tab]")) {
     t.classList.toggle("active", t.dataset.agentTab === agent.tab);
@@ -155,6 +193,16 @@ function renderChat() {
   const view = agent.view;
   $("agent-stop").hidden = !agent.busy;
   $("agent-send").disabled = agent.busy;
+  if (!view && agent.mode === "chat") {
+    const name = escapeHtml(state.chat?.name ?? "this chat");
+    log.innerHTML = `<div class="agent-empty muted small">
+      <p>${name}'s own agent. It keeps a notebook for this story and has its own personality, both in <code>agent/chats/${name}/</code> (see Files).</p>
+      <p>Ask it to comb old messages, retcon something, or note what to keep consistent. The notebook is never sent to the roleplay model.</p>
+      <p>Like the main agent, it changes things only when you ask, and every change can be reverted.</p>
+      ${state.settings?.agentProfileId ? "" : "<p><strong>First pick a profile for it in Settings → Agent.</strong></p>"}
+    </div>`;
+    return;
+  }
   if (!view) {
     log.innerHTML = `<div class="agent-empty muted small">
       <p>Ask the agent to read, search or revise your cards, prompts and chats, or to draft something into its notes.</p>
@@ -251,9 +299,11 @@ async function send(text) {
   text = text.trim();
   if (!text || agent.busy) return;
   if (!agent.sessionId) {
-    const s = await attempt(() => api("POST", "/api/agent/sessions", { chatId: state.chatId }));
+    const s = await attempt(() => api("POST", "/api/agent/sessions", { chatId: state.chatId, scope: agent.mode }));
     if (!s) return;
     agent.sessionId = s.id;
+    lastSessions[owner()] = s.id;
+    remember("anoesia.agentSessions", lastSessions);
     agent.view = { session: s, messages: [], edits: [] };
   }
   const id = agent.sessionId;
@@ -283,7 +333,11 @@ async function send(text) {
 async function refreshApp() {
   await loadState();
   renderSide();
-  if (state.chatId) await openChat(state.chatId);
+  if (state.chatId) {
+    await openChat(state.chatId);
+    // openChat only loads; draw the messages so the agent's edits show at once.
+    renderRoleplay();
+  }
 }
 
 async function revert(path, label) {
@@ -311,6 +365,22 @@ export function wireAgent() {
   $("agent-close").addEventListener("click", () => toggleAgent(false));
   $("agent-new").addEventListener("click", newSession);
   $("agent-session").addEventListener("change", (e) => openSession(e.target.value || null));
+  for (const b of document.querySelectorAll("[data-agent-mode]"))
+    b.addEventListener("click", async () => {
+      if (agent.busy || agent.mode === b.dataset.agentMode) return;
+      agent.mode = b.dataset.agentMode;
+      remember("anoesia.agentMode", agent.mode);
+      await refreshList();
+      await pickSession();
+    });
+  // Another chat opened: a chat's agent belongs to its chat, so follow it.
+  document.addEventListener("anoesia:chat-opened", async () => {
+    if (!agent.open || agent.busy) return;
+    if (agent.mode === "chat") {
+      await refreshList();
+      await pickSession();
+    } else renderAll();
+  });
   for (const t of document.querySelectorAll("[data-agent-tab]"))
     t.addEventListener("click", async () => {
       agent.tab = t.dataset.agentTab;
