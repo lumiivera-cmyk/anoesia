@@ -39,6 +39,7 @@ export async function openChat(id) {
   if (!id) {
     state.chat = null;
     state.messages = [];
+    document.dispatchEvent(new CustomEvent("anoesia:chat-opened"));
     return;
   }
   const view = await attempt(() => api("GET", `/api/chats/${id}`));
@@ -48,6 +49,8 @@ export async function openChat(id) {
     state.chat = null;
     state.messages = [];
   }
+  // The open chat's own agent follows the chat (js/agent.js).
+  document.dispatchEvent(new CustomEvent("anoesia:chat-opened"));
 }
 
 function applyView(view, draw = true) {

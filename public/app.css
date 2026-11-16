@@ -519,6 +519,10 @@ select option{background:#15131C;color:var(--ink-1)}
 .agent-header{display:flex;align-items:center;gap:8px;min-height:48px}
 .agent-header select{flex:1;min-width:0;background:var(--sunk-bg);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px}
 .agent-tabs{display:flex;gap:4px;padding:4px;margin:10px 0}
+.agent-modes{display:flex;gap:4px;padding:4px;margin:10px 0 0}
+.agent-modes button{flex:1;min-width:0;min-height:38px;border:0;border-radius:8px;background:transparent;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-modes button.active{background:var(--seg-on);color:var(--ink-1)}
+.agent-modes button:disabled{opacity:.5;cursor:default}
 .agent-tabs button{flex:1;min-height:38px;border:0;border-radius:8px;background:transparent;color:var(--ink-3)}
 .agent-tabs button.active{background:var(--seg-on);color:var(--ink-1)}
 .agent-chat{display:flex;flex:1;flex-direction:column;min-height:0}
@@ -541,3 +545,4 @@ select option{background:#15131C;color:var(--ink-1)}
 .agent-options{display:grid;gap:6px}.agent-option{display:flex;flex-direction:column;text-align:left}
 .agent-error{padding:8px;color:var(--danger-ink)}
 @media(max-width:899px){.agent-panel{width:100vw;padding:12px}}
+.agent-edit-head button{white-space:nowrap;flex-shrink:0}

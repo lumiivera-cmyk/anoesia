@@ -13,7 +13,7 @@ import type { AgentStore } from "./agentstore.ts";
 import { ValidationError, newId } from "./errors.ts";
 import { ApiError, createChatCompletion, type ApiOptions } from "./nanogpt.ts";
 import type { Store } from "./store.ts";
-import type { AgentApiMessage, AgentEdit, AgentMessage, ApiToolCall } from "./types.ts";
+import type { AgentApiMessage, AgentEdit, AgentMessage, AgentSession, ApiToolCall } from "./types.ts";
 import type { Workspace } from "./workspace.ts";
 
 /** Tool rounds in one turn before the agent has to answer in words. */
@@ -27,8 +27,9 @@ export interface TurnResult {
 }
 
 /** The agent's standing instructions, with its files and a map of what's there now. */
-export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, chatId: string | null): string {
-  const personality = agent.file("personality.md")?.content.trim() ?? "";
+export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, chatId: string | null, scope: AgentSession["scope"] = "main"): string {
+  const ownPersonality = scope === "chat" && chatId ? agent.file(`chats/${chatId}/personality.md`)?.content.trim() : undefined;
+  const personality = ownPersonality ?? agent.file("personality.md")?.content.trim() ?? "";
   const index = agent.file("index.md")?.content.trim() ?? "";
   const notebook = chatId ? agent.file(`chats/${chatId}/notebook.md`)?.content.trim() : "";
   const cards = store.cards();
@@ -36,8 +37,12 @@ export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, cha
   const open = chatId ? chats.find((c) => c.id === chatId) : undefined;
   const files = agent.files().map((f) => ws.displayFilePath(f.path));
 
+  const who =
+    scope === "chat" && open
+      ? `You are the agent for one chat in Anoesia, a roleplay app: "${open.name}". You help the person who uses it write and tune this chat: its messages, its prompt blocks, its cast's cards, and the notebook you keep for it at agent/chats/${open.name}/notebook.md. You are not the roleplay narrator: you work on the story from outside it. Your folder is agent/chats/${open.name}/, and your personality is its personality.md.`
+      : `You are the agent inside Anoesia, a roleplay app. You help the person who uses it write and tune their cards, prompts and chats. You are not the roleplay narrator: you work on the story from outside it.`;
   return [
-    `You are the agent inside Anoesia, a roleplay app. You help the person who uses it write and tune their cards, prompts and chats. You are not the roleplay narrator: you work on the story from outside it.`,
+    who,
     personality,
     `## How you work
 
@@ -47,7 +52,7 @@ export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, cha
 - Drafts (a card rewrite, a new block, a scene) go in agent/notes/ unless they say otherwise. Tell them the path.
 - To comb a chat (take out a habit, retcon a detail): grep the chat's messages, read each hit, and edit each message with the smallest change that does it. Don't touch anything else in the message. Report how many messages you changed.
 - Use edit for small changes and write for whole texts. Copy find text exactly from read.
-- Keep lasting preferences and decisions with remember.
+- Keep lasting preferences and decisions with remember.${scope === "chat" ? " Notes about this story (what happened, what's true now, what to keep consistent) go in this chat's notebook: remember puts them there unless you pass global. The notebook is never sent to the roleplay model." : ""}
 
 ## Paths
 
@@ -105,6 +110,7 @@ export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Works
   if (!text) throw new ValidationError("Write something to the agent first.");
 
   const session = agent.updateSession(input.sessionId, { chatId: input.chatId });
+  if (session.scope === "chat" && !session.chatId) throw new ValidationError("This session's chat was deleted. Start a session with the main agent instead.");
   const turnId = newId();
   const added: AgentMessage[] = [];
   const edits: AgentEdit[] = [];
@@ -114,7 +120,7 @@ export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Works
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const last = round === MAX_ROUNDS - 1;
     const conversation: AgentApiMessage[] = [
-      { role: "system", content: systemPrompt(store, agent, ws, session.chatId) },
+      { role: "system", content: systemPrompt(store, agent, ws, session.chatId, session.scope) },
       ...toApiMessages(agent.messages(session.id), turnId),
     ];
     const result = await createChatCompletion(api, {
@@ -154,7 +160,7 @@ export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Works
       // After a question, the rest wait for the answer.
       const outcome = stop
         ? { text: "Not run: you asked the person a question first. Wait for their answer." }
-        : runTool(call.name, call.arguments, { ws, ctx: { sessionId: session.id, turnId }, chatId: session.chatId });
+        : runTool(call.name, call.arguments, { ws, ctx: { sessionId: session.id, turnId }, chatId: session.chatId, scope: session.scope });
       if (outcome.edits) edits.push(...outcome.edits);
       if ("stop" in outcome && outcome.stop) stop = true;
       added.push(agent.addMessage({ sessionId: session.id, turnId, role: "tool", content: outcome.text, toolCallId: call.id, toolName: call.name }));

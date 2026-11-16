@@ -312,6 +312,41 @@ describe("agent turns through the server", () => {
     expect((await call("GET", "/api/state")).data.settings.mainPrompt).toContain("roleplay");
   });
 
+  test("a chat's own agent: its personality, its notebook, and it stays with its chat", async () => {
+    const { profile, chat } = await setUp();
+    await call("PATCH", "/api/settings", { agentProfileId: profile.id });
+    expect((await call("POST", "/api/agent/sessions", { scope: "chat" })).status).toBe(400);
+    const session = (await call("POST", "/api/agent/sessions", { scope: "chat", chatId: chat.id })).data;
+    expect(session.scope).toBe("chat");
+    const files = (await call("GET", "/api/agent/files")).data.map((f: any) => f.display);
+    expect(files).toContain("agent/chats/Night Market/personality.md");
+    await call("PUT", "/api/agent/files", { path: `chats/${chat.id}/personality.md`, content: "You are Moth, this chat's keeper." });
+
+    const other = (await call("POST", "/api/chats", { name: "Elsewhere" })).data;
+    script.push({ content: "", tool_calls: [toolCall("n", "remember", { note: "Ada's wrist is sprained.", heading: "Facts" })] }, { content: "Noted." });
+    const r = await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Remember the wrist.", chatId: other.id });
+    expect(r.data.error).toBeUndefined();
+    expect(r.data.session.chatId).toBe(chat.id);
+    const system = String(received[0]!.messages[0]!.content);
+    expect(system).toContain('the agent for one chat in Anoesia, a roleplay app: "Night Market"');
+    expect(system).toContain("You are Moth");
+    expect(system).not.toContain("You help write and tune roleplay in Anoesia");
+    expect(system).toContain("Open chat: Night Market");
+    expect(r.data.edits[0].path).toBe("agent/chats/Night Market/notebook.md");
+
+    // The next turn sees the notebook; the roleplay model never does.
+    script.push({ content: "Hi." });
+    await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Hello?" });
+    expect(String(received[2]!.messages[0]!.content)).toContain("Ada's wrist is sprained.");
+    const preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    expect(JSON.stringify(preview)).not.toContain("wrist is sprained");
+
+    // A deleted chat leaves its sessions unable to run, with a clear reason.
+    await call("DELETE", `/api/chats/${chat.id}`);
+    const gone = await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Still there?" });
+    expect(gone.data.error ?? "").toContain("chat was deleted");
+  });
+
   test("files can be read and written from the panel", async () => {
     await setUp();
     const listed = await call("GET", "/api/agent/files");
