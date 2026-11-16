@@ -95,7 +95,7 @@ export function renderChat(scrollToEnd = false) {
   const others = cast.filter((c) => !c.isPersona);
   $("phone-title").innerHTML = `<span class="pt-name">${escapeHtml(chat ? chat.name : "Anoesia")}</span>
     <span class="pt-line">${others.length ? `<span class="pt-gems">${others.map((c) => gem(c, 12, { label: false })).join("")}</span>` : ""}<span class="meta">${escapeHtml(chat ? `${others.map(shortName).join(", ") || "no cast yet"}` : "")}</span></span>`;
-  $("phone-title").setAttribute("aria-label", chat ? `${chat.name}: chat settings` : "Chat settings");
+  $("phone-title").setAttribute("aria-label", `${chat ? `${chat.name} ${others.map(shortName).join(", ") || "no cast yet"}` : "Anoesia"}: chat settings`);
   for (const id of ["go-preview", "go-prompts", "open-chat-settings", "open-chat-menu", "phone-title"]) {
     const el = $(id);
     if (chat) el.removeAttribute("aria-disabled");
