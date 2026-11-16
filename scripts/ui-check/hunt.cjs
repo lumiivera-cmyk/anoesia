@@ -68,15 +68,16 @@ const CONTROLS = `() => {
 const SNAP = `() => document.body.innerHTML.replace(/ data-hunt-i="\\d+"/g, "") + location.hash + [...document.querySelectorAll("dialog[open]")].map((d) => d.id).join()`;
 const TEXTS = `() => { const out = [];
   const effOp = (el) => { let o = 1; for (let a = el; a && a !== document.documentElement; a = a.parentElement) o *= +getComputedStyle(a).opacity; return o; };
+  const clipped = (el) => { for (let a = el; a && a !== document.documentElement; a = a.parentElement) if (getComputedStyle(a).clipPath !== "none") return true; return false; };
   const top = [...document.querySelectorAll("dialog[open]")].pop();
   for (const el of document.body.querySelectorAll('*')) {
-    if (el.closest('.sr') || el.closest('[aria-hidden="true"]') || (top && !top.contains(el))) continue;
+    if (el.closest('.sr') || el.closest('[aria-hidden="true"]') || (top && !top.contains(el)) || clipped(el)) continue;
     const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim()); if (!own.length) continue;
     const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
     const rg = document.createRange(); rg.selectNodeContents(own[0]); const r = rg.getBoundingClientRect();
     if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
     const m = cs.color.match(/[\\d.]+/g).map(Number);
-    out.push({ t: own.map((n) => n.textContent).join(' ').trim().replace(/\\s+/g, ' ').slice(0, 40), x: r.left, y: r.top, w: r.width, h: r.height, c: m.slice(0, 3), a: (m.length > 3 ? m[3] : 1) * effOp(el), fs: parseFloat(cs.fontSize), fw: +cs.fontWeight, tag: el.tagName.toLowerCase() });
+    out.push({ t: own.map((n) => n.textContent).join(' ').trim().replace(/\\s+/g, ' ').slice(0, 40), x: r.left, y: r.top, w: r.width, h: r.height, c: m.slice(0, 3), a: (m.length > 3 ? m[3] : 1) * effOp(el), fs: parseFloat(cs.fontSize), fw: +cs.fontWeight, tag: el.tagName.toLowerCase(), disabled: !!el.closest(':disabled,[aria-disabled="true"]') });
   } return out; }`;
 (async () => {
   const only = process.argv.slice(2);
