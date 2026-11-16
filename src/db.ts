@@ -182,12 +182,12 @@ export function openDatabase(path: string): Database {
   // set at user_version 3 or 4. Run only the shared foundation migrations
   // here, then reconcile the optional tables/columns by inspecting the schema.
   // This makes upgrades safe whichever branch created the existing database.
-  for (let i = version; i < Math.min(MIGRATIONS.length, 2); i++) {
+  const step = (i: number) =>
     db.transaction(() => {
       db.exec(MIGRATIONS[i]!);
       db.exec(`PRAGMA user_version = ${i + 1}`);
     })();
-  }
+  for (let i = version; i < Math.min(MIGRATIONS.length, 2); i++) step(i);
   db.transaction(() => {
     const columns = new Set((db.query("PRAGMA table_info(cards)").all() as { name: string }[]).map((c) => c.name));
     if (!columns.has("colour")) db.exec("ALTER TABLE cards ADD COLUMN colour TEXT NOT NULL DEFAULT 'violet'");
@@ -221,5 +221,7 @@ export function openDatabase(path: string): Database {
     `);
     db.exec(`PRAGMA user_version = ${Math.max(version, 5)}`);
   })();
+  // Everything after 5 is ordinary again: each new migration runs once.
+  for (let i = Math.max(version, 5); i < MIGRATIONS.length; i++) step(i);
   return db;
 }

@@ -153,9 +153,9 @@
         <button type="button" class="ghost press ib" id="agent-close" aria-label="Close the agent">✕</button>
       </header>
       <div class="seg sunk agent-tabs" role="tablist" aria-label="Agent views">
-        <button type="button" class="tab active" data-agent-tab="chat">Chat</button>
-        <button type="button" class="tab" data-agent-tab="changes">Changes</button>
-        <button type="button" class="tab" data-agent-tab="files">Files</button>
+        <button type="button" class="tab active" data-agent-tab="chat" role="tab" aria-selected="true">Chat</button>
+        <button type="button" class="tab" data-agent-tab="changes" role="tab" aria-selected="false">Changes</button>
+        <button type="button" class="tab" data-agent-tab="files" role="tab" aria-selected="false">Files</button>
       </div>
       <section class="agent-chat" id="agent-chat">
         <div class="agent-log scroll" id="agent-log" aria-live="polite"></div>

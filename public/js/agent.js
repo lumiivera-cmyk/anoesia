@@ -79,7 +79,10 @@ function renderAll() {
   $("agent-session").innerHTML =
     agent.sessions.map((s) => `<option value="${s.id}" ${s.id === agent.sessionId ? "selected" : ""}>${escapeHtml(s.title)}</option>`).join("") ||
     `<option value="">No sessions yet</option>`;
-  for (const t of document.querySelectorAll("[data-agent-tab]")) t.classList.toggle("active", t.dataset.agentTab === agent.tab);
+  for (const t of document.querySelectorAll("[data-agent-tab]")) {
+    t.classList.toggle("active", t.dataset.agentTab === agent.tab);
+    t.setAttribute("aria-selected", String(t.dataset.agentTab === agent.tab));
+  }
   $("agent-chat").hidden = agent.tab !== "chat";
   $("agent-changes").hidden = agent.tab !== "changes";
   $("agent-files").hidden = agent.tab !== "files";
