@@ -289,9 +289,11 @@ describe("cards", () => {
 describe("settings", () => {
   test("background settings are checked and kept", async () => {
     const start = (await call("GET", "/api/state")).data.settings.background;
-    expect(start).toEqual({ photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
+    expect(start).toEqual({ material: "lacquer", photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
     const changed = (await call("PATCH", "/api/settings", { background: { finish: "roiro", dim: 0.1, window: 0.5 } })).data.background;
-    expect(changed).toEqual({ photo: "none", finish: "roiro", tint: 0.6, dim: 0.1, window: 0.5 });
+    expect(changed).toEqual({ material: "lacquer", photo: "none", finish: "roiro", tint: 0.6, dim: 0.1, window: 0.5 });
+    expect((await call("PATCH", "/api/settings", { background: { material: "selenite" } })).data.background.material).toBe("selenite");
+    expect((await call("PATCH", "/api/settings", { background: { material: "glass" } })).status).toBe(400);
     expect((await call("PATCH", "/api/settings", { background: { dim: 0.9 } })).status).toBe(400);
     expect((await call("PATCH", "/api/settings", { background: { photo: "moon" } })).status).toBe(404);
     expect((await call("PATCH", "/api/settings", { background: { window: null } })).data.background.window).toBeNull();

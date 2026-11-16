@@ -13,7 +13,7 @@ import type { Background, BlockKind, Card, CardField, Chat, FieldKey, Finish, Me
 
 const now = () => new Date().toISOString();
 
-export const DEFAULT_BACKGROUND: Background = { photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
+export const DEFAULT_BACKGROUND: Background = { material: "lacquer", photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
 
 const DEFAULT_SETTINGS: Settings = {
   rpProfileId: "",
@@ -701,6 +701,10 @@ function backgroundInput(raw: unknown, current: Background): Background {
   if (b.photo !== undefined) {
     if (typeof b.photo !== "string" || !b.photo) throw new ValidationError("The background photo is a photo's id, or none.");
     out.photo = b.photo;
+  }
+  if (b.material !== undefined) {
+    if (b.material !== "lacquer" && b.material !== "selenite") throw new ValidationError("The material is lacquer or selenite.");
+    out.material = b.material;
   }
   if (b.finish !== undefined) {
     if (!FINISHES.includes(b.finish as Finish)) throw new ValidationError("The finish is roiro, tamenuri or shunkei.");

@@ -45,6 +45,8 @@ const SETTINGS = (phone) => [
   ["settings agent", settings("/agent")],
   ["settings typing", settings("/typing")],
 ];
+// The same Settings screens in selenite (your material set to selenite first).
+const SELENITE = (phone) => SETTINGS(phone).map(([n, f]) => [n.replace("settings", "selenite settings"), then(send("PATCH", "/api/settings", { background: { material: "selenite" } }), f)]);
 const SCREENS = {
   desk: [
     ["chat", chat("Backstage")],
@@ -52,6 +54,7 @@ const SCREENS = {
     ["chat settings", then(chat("Backstage"), tap("#open-chat-settings"))],
     ["settings from the sidebar", then(chat("Backstage"), tap('#side a[href="#/settings"]'))],
     ...SETTINGS(false),
+    ...SELENITE(false),
     ["prompts", prompts],
     ["prompts sent", then(prompts, tap("#pv-sent"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -71,6 +74,7 @@ const SCREENS = {
     ["chat settings", then(chat("Backstage"), tap("#phone-title"))],
     ["settings from the drawer", then(chat("Backstage"), tap("#open-drawer"), tap('#drawer a[href="#/settings"]'))],
     ...SETTINGS(true),
+    ...SELENITE(true),
     ["prompts", prompts],
     ["prompts preview", then(prompts, tap("#tab-preview"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -100,6 +104,10 @@ const TEXTS = `() => { const out = [];
     const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
     const rg = document.createRange(); rg.selectNodeContents(own[0]); const r = rg.getBoundingClientRect();
     if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
+    // text scrolled out of its scroll area isn't on screen, whatever its box says
+    let hiddenByScroll = false;
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const ac = getComputedStyle(a); if (ac.overflowX === "visible" && ac.overflowY === "visible") continue; const ar = a.getBoundingClientRect(); if (r.bottom <= ar.top + 1 || r.top >= ar.bottom - 1 || r.right <= ar.left + 1 || r.left >= ar.right - 1) { hiddenByScroll = true; break; } }
+    if (hiddenByScroll) continue;
     const m = cs.color.match(/[\\d.]+/g).map(Number);
     out.push({ t: own.map((n) => n.textContent).join(' ').trim().replace(/\\s+/g, ' ').slice(0, 40), x: r.left, y: r.top, w: r.width, h: r.height, c: m.slice(0, 3), a: (m.length > 3 ? m[3] : 1) * effOp(el), fs: parseFloat(cs.fontSize), fw: +cs.fontWeight, tag: el.tagName.toLowerCase(), disabled: !!el.closest(':disabled,[aria-disabled="true"]') });
   } return out; }`;
@@ -119,6 +127,8 @@ const TEXTS = `() => { const out = [];
     p.on("console", (m) => m.type() === "error" && errs.push("console: " + m.text().slice(0, 200)));
     let setupErr = null;
     try { await setup(p); } catch (e) { setupErr = String(e).split("\n")[0]; }
+    // selenite plates paint in a worker: measure once they're up (the click test doesn't need them)
+    await p.waitForFunction(() => !document.querySelector(".plate.pending"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
     const r = { errors: [...errs], setupErr };
     await p.addScriptTag({ path: AXE });
     r.axe = await p.evaluate(async () => { const top = [...document.querySelectorAll("dialog[open]")].pop();

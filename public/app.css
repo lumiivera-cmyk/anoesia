@@ -708,3 +708,49 @@ html[data-view="settings"] .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),.3))}
   .fin .d{display:none}
   .readnote{flex-wrap:wrap}
 }
+
+/* ------------------------------------------------------------- selenite */
+/* While selenite is up (html.sel: your material, on a page that has its selenite design, so far
+   Settings), the page's panes become crystal plates. js/selenite/plates.js lays each plate in
+   #plates, under the app and over the photo, at its host's box; dialogs carry their own. */
+#plates{position:fixed;inset:0;z-index:1;pointer-events:none}
+.plate{position:absolute;pointer-events:none}
+.plate .gl{inset:0}
+.plate.pending .under,.plate.pending .light,.plate.pending .zone,.plate.pending .spec{display:none}
+.plate.pending .fx{-webkit-backdrop-filter:blur(12px) saturate(1.1) brightness(1.05);backdrop-filter:blur(12px) saturate(1.1) brightness(1.05)}
+html.sel .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),var(--dim-floor,.3)))}
+.bg .tubes{position:absolute;inset:0;width:100%;height:100%;display:none}
+.sel:not(.has-photo) .bg .tubes{display:block}
+/* text on crystal gets the boards' soft shadow */
+.sel .side,.sel .view-settings,.sel dialog.mpick{text-shadow:0 1px 2px rgba(0,0,0,.6),0 0 10px rgba(0,0,0,.35)}
+.sel .side,.sel .view-settings,.sel .view-settings .page-head{background:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;border:0;box-shadow:none}
+.sel .set-nav{border:0}
+/* the small menus are frosted panels over the plates */
+.sel dialog.pick-menu,.sel dialog.glass:not(.mpick){background:rgba(12,10,20,.94)!important;-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 22px 50px rgba(0,0,0,.75)}
+/* the model list: its own plate */
+.sel dialog.mpick{background:transparent!important;box-shadow:none;overflow:visible;padding:22px 24px 26px}
+.sel dialog.mpick>:not(.plate){position:relative;z-index:3}
+/* Look, in selenite */
+.lk-preview svg.pv-img{display:block}
+.lk-preview .pv-story.on-crystal{background:rgba(10,8,18,.42);-webkit-backdrop-filter:blur(1.5px) saturate(1.1);backdrop-filter:blur(1.5px) saturate(1.1);box-shadow:inset 1px 0 0 rgba(255,255,255,.28),inset 0 1px 0 rgba(255,255,255,.18)}
+.sel .lk-preview .pv-col{background:rgba(10,8,18,.34)!important;-webkit-backdrop-filter:blur(1.5px)!important;backdrop-filter:blur(1.5px)!important}
+.photo .tubes-img{position:relative;overflow:hidden;background:#060609}
+.photo .tubes-img svg{position:absolute;inset:0;width:100%;height:100%}
+@media (min-width:900px){
+  /* the selenite board's spacing: plates 12 px from the window, 28 px after the sidebar, 20 px apart */
+  .sel .app{padding:12px;box-sizing:border-box;gap:28px}
+  .sel .side{flex-basis:256px;padding:22px 26px 30px 20px}
+  .sel .view-settings .page-head{height:72px;box-sizing:border-box;padding:0 22px;flex-wrap:nowrap}
+  .sel .view-settings .set-cols{margin-top:20px}
+  /* the scroll areas sit inside their plates' clear zones; the plates reach past them */
+  .sel .set-nav{flex:0 0 230px;margin:32px 22px 50px 20px;padding:0 4px 12px 0}
+  .sel .set-main{margin:24px 28px 54px 46px;padding:8px 10px 40px}
+}
+@media (max-width:899px){
+  /* phone: every page is one plate with the header inside it */
+  .sel .view-settings{margin:max(6px,env(safe-area-inset-top)) 6px max(6px,env(safe-area-inset-bottom))}
+  .sel .view-settings .page-head{padding:14px 16px 6px 12px}
+  .sel .view-settings .set-cols{margin:0 0 24px}
+  .sel .set-nav,.sel .set-main{padding:10px 30px 32px 14px}
+  .sel dialog.mpick{padding:50px 18px max(18px,env(safe-area-inset-bottom))!important}
+}

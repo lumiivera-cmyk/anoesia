@@ -19,7 +19,7 @@
 import { $, api, attempt, dayLabel, escapeHtml, fmt, go, isPhone, shortModel, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { closeOverlay, confirmDialog, openOverlay } from "./overlay.js";
-import { applyBackground, belowReadable, FINISHES, preparePhoto, READABLE, windowDefault } from "./theme.js";
+import { applyBackground, belowReadable, dialogPlate, FINISHES, hasWindow, preparePhoto, readable, readableDim, tubesSvg, windowDefault } from "./theme.js";
 import { openAgentTab } from "./agent.js";
 
 const SECTIONS = {
@@ -123,7 +123,8 @@ function summary(key) {
   }
   if (key === "look") {
     const photo = state.photos.find((p) => p.id === bg().photo);
-    return { text: `lacquer · ${bg().finish} · ${photo ? photo.name : "no photo"}${belowReadable(bg()) ? " · below readable" : ""}`, bad: false };
+    const sel = bg().material === "selenite";
+    return { text: `${sel ? "selenite" : `lacquer · ${bg().finish}`} · ${photo ? photo.name : sel ? "neon tubes" : "no photo"}${belowReadable(bg()) ? " · below readable" : ""}`, bad: false };
   }
   if (key === "agent") return { text: "edits directly, all logged", bad: false };
   return { text: s.enterSends === false ? "Enter adds a line" : "Enter sends", bad: false };
@@ -174,7 +175,7 @@ function redraw() {
 /** A selector that finds the same control again after a redraw. */
 function focusKey(el) {
   if (el.id) return `#${CSS.escape(el.id)}`;
-  for (const attr of ["data-assign", "data-photo", "data-finish", "data-provider", "data-effort", "data-enter", "data-setup", "data-test", "data-fix", "data-readable", "data-more"]) {
+  for (const attr of ["data-assign", "data-photo", "data-finish", "data-provider", "data-effort", "data-enter", "data-setup", "data-test", "data-fix", "data-readable", "data-more", "data-material"]) {
     if (el.hasAttribute(attr)) return `[${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
   }
   return null;
@@ -565,6 +566,8 @@ function openPicker(opener) {
     focus: "#model-q",
     onClose: () => opener.isConnected && opener.setAttribute("aria-expanded", "false"),
   });
+  // selenite: the model list gets its own plate (+0.3 smoke, like the phone sheets)
+  dialogPlate(dlg, ["smodel", { extra: 0.3, blur: 9 }], ["sheet", { extra: 0.3, blur: 10, grow: { l: 12, r: 12, b: 16 } }]);
   loadModels(p.provider);
 }
 
@@ -647,6 +650,7 @@ async function assign(job, id) {
 
 function lookHtml() {
   const b = bg();
+  const sel = b.material === "selenite";
   const photo = state.photos.find((p) => p.id === b.photo);
   const wDef = windowDefault();
   const tick = (v, lo, hi) => ((v - lo) / (hi - lo)).toFixed(4);
@@ -667,37 +671,46 @@ function lookHtml() {
   return `${sechead("Look")}
     <p class="secsub">Everything behind and around the story. The preview shows exactly how a chat will look. This page follows along, but never gets harder to read than the defaults, so you can always find your way back.</p>
     <div class="lk-preview" role="img" aria-label="Preview of a chat with these settings">
-      ${photo ? `<img class="pv-img" src="${escapeHtml(photo.url)}" alt="" style="object-position:${escapeHtml(photo.position)}" />` : ""}
+      ${photo ? `<img class="pv-img" src="${escapeHtml(photo.url)}" alt="" style="object-position:${escapeHtml(photo.position)}" />` : sel ? tubesSvg("bloom-pv", { cls: "pv-img", bloom: 0.3 }) : ""}
       <div class="pv-dim"></div>
       <div class="pv-col glass" aria-hidden="true"><span class="eyebrow">chats</span>${state.chats
         .slice(0, 3)
         .map((c, i) => `<span class="${i ? "pv-other" : "pv-cur"}">${escapeHtml(c.name)}</span>`)
         .join("")}</div>
-      <div class="pv-story ${photo ? "on-photo" : ""}"><span class="eyebrow">narrator</span>By the time they reach the roof, the rain has turned the whole district into a mirror. Rumi stops at the railing and doesn't look back.</div>
+      <div class="pv-story ${sel ? "on-crystal" : photo ? "on-photo" : ""}"><span class="eyebrow">narrator</span>By the time they reach the roof, the rain has turned the whole district into a mirror. Rumi stops at the railing and doesn't look back.</div>
     </div>
     <p class="readnote" role="status" id="readnote" data-below="${belowReadable(b)}">${readnoteHtml()}</p>
     <div class="grouphead"><h3 class="eyebrow" id="mat-h">material</h3></div>
     <div class="mat-grid" role="radiogroup" aria-labelledby="mat-h">
-      <button type="button" class="choice raised mat press" ${choice(true)}><span class="sw sw-lacquer" aria-hidden="true"></span>${chk}<span class="n">Lacquer</span><span class="d">warm and solid; retints to your photo</span></button>
-      <button type="button" class="choice raised mat press" ${choice(false)} aria-disabled="true" aria-describedby="sel-later"><span class="sw sw-selenite" aria-hidden="true"></span>${chk}<span class="n">Selenite</span><span class="d" id="sel-later">crystal plates that bend the photo behind them. Coming next.</span></button>
+      <button type="button" class="choice raised mat press" ${choice(!sel)} data-material="lacquer"><span class="sw sw-lacquer" aria-hidden="true"></span>${chk}<span class="n">Lacquer</span><span class="d">warm and solid; retints to your photo</span></button>
+      <button type="button" class="choice raised mat press" ${choice(sel)} data-material="selenite"><span class="sw sw-selenite" aria-hidden="true"></span>${chk}<span class="n">Selenite</span><span class="d">crystal plates that bend the photo behind them</span></button>
     </div>
+    ${sel ? `<p class="meta note">Selenite reaches Settings first. Chat, cards and prompts stay lacquer until theirs is ready.</p>` : ""}
     <div class="grouphead"><h3 class="eyebrow" id="photo-h">photo</h3><span class="meta">behind everything</span></div>
     <div class="photo-grid2" role="radiogroup" aria-labelledby="photo-h">
-      <button type="button" class="choice photo press" ${choice(b.photo === "none")} data-photo="none" aria-label="no photo"><span class="img sunk plain" aria-hidden="true">plain</span>${chk}<span class="cap">no photo</span></button>${photos}
+      ${
+        sel
+          ? `<button type="button" class="choice photo press" ${choice(b.photo === "none")} data-photo="none" aria-label="neon tubes"><span class="img tubes-img" aria-hidden="true">${tubesSvg("bloom-th", { cls: "", bloom: 0.15 })}</span>${chk}<span class="cap">neon tubes</span></button>`
+          : `<button type="button" class="choice photo press" ${choice(b.photo === "none")} data-photo="none" aria-label="no photo"><span class="img sunk plain" aria-hidden="true">plain</span>${chk}<span class="cap">no photo</span></button>`
+      }${photos}
       <label class="photo-add2 press"><span class="img add-img">${icon.plus(20)}</span><span class="cap">add a photo</span><input type="file" accept="image/jpeg,image/png,image/webp" id="photo-file" class="sr-file" /></label>
     </div>
     <p class="meta note" id="photo-status" role="status">${state.photos.length ? "" : "Add a photo of your own to sit behind the app. It's kept on your server, not shared."}</p>
     ${photo ? `<button type="button" class="btn btn-quiet-danger press rm-photo" data-remove-photo="${photo.id}">${icon.trash()}remove “${escapeHtml(photo.name)}”</button>` : ""}
-    <div class="grouphead"><h3 class="eyebrow" id="fin-h">lacquer</h3></div>
+    ${
+      sel
+        ? ""
+        : `<div class="grouphead"><h3 class="eyebrow" id="fin-h">lacquer</h3></div>
     <div class="fin-grid" role="radiogroup" aria-labelledby="fin-h">${finishes}</div>
     <div class="setgroup">
       ${lookSlider({ id: "lk-tint", key: "tint", label: "Tint", hint: "how much of the photo's colour the lacquer takes on", value: b.tint, min: 0, max: 1, step: 0.05, ends: ["plain black", "the photo's colour"] })}
-    </div>
+    </div>`
+    }
     <div class="grouphead"><h3 class="eyebrow">readability</h3>
       <button type="button" class="btn press ${belowReadable(b) ? "raised" : "ghost"}" data-readable aria-label="${READABLE_LABEL}">${icon.reset()}back to readable</button></div>
     <div class="setgroup">
-      ${lookSlider({ id: "lk-dim", key: "dim", label: "Dim", hint: "darkens the photo everywhere. The mark is the readable default.", value: b.dim, min: 0, max: 0.8, step: 0.05, ends: ["photo as it is", "nearly black"], tick: tick(READABLE.dim, 0, 0.8) })}
-      ${lookSlider({ id: "lk-win", key: "window", label: "Reading column", hint: "how dark the column behind the story is. The mark is the readable default.", value: win(), min: 0.3, max: 0.95, step: 0.01, ends: ["see-through", "solid"], tick: tick(wDef, 0.3, 0.95) })}
+      ${lookSlider({ id: "lk-dim", key: "dim", label: "Dim", hint: "darkens the photo everywhere. The mark is the readable default.", value: b.dim, min: 0, max: 0.8, step: 0.05, ends: ["photo as it is", "nearly black"], tick: tick(readableDim(), 0, 0.8) })}
+      ${hasWindow() ? lookSlider({ id: "lk-win", key: "window", label: "Reading column", hint: "how dark the column behind the story is. The mark is the readable default.", value: win(), min: 0.3, max: 0.95, step: 0.01, ends: ["see-through", "solid"], tick: tick(wDef, 0.3, 0.95) }) : ""}
     </div>`;
 }
 
@@ -956,7 +969,14 @@ export function wireSettings() {
     // look
     if (btn.dataset.photo) return saveBackground({ photo: btn.dataset.photo }, true);
     if (btn.dataset.finish) return saveBackground({ finish: btn.dataset.finish }, true);
-    if (btn.hasAttribute("data-readable")) return saveBackground({ ...READABLE }, true);
+    if (btn.hasAttribute("data-readable")) return saveBackground(readable(), true);
+    if (btn.dataset.material) {
+      const material = btn.dataset.material;
+      if (material === bg().material) return;
+      // each material's readable dim: 0.3 for lacquer, 0.35 for selenite (on a wide screen)
+      const dim = material === "selenite" && bg().dim === 0.3 ? 0.35 : material === "lacquer" && bg().dim === 0.35 ? 0.3 : bg().dim;
+      return saveBackground({ material, dim }, true);
+    }
     if (btn.dataset.removePhoto) {
       const photo = state.photos.find((p) => p.id === btn.dataset.removePhoto);
       const ok = await confirmDialog({ title: `Remove “${photo?.name ?? "this photo"}”?`, body: "It's deleted from your server. The background goes back to none.", confirm: "remove photo", opener: btn });

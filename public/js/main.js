@@ -6,7 +6,7 @@
 import { $, attempt, go, loadState, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { openDrawer, renderSide, wireSide } from "./side.js";
-import { applyBackground } from "./theme.js";
+import { applyBackground, applyMaterial } from "./theme.js";
 import { openChat, showChatView, wireChat } from "./chat.js";
 import { showPrompts, wirePrompts } from "./prompts.js";
 import { showCards, wireCards } from "./cards.js";
@@ -39,6 +39,7 @@ async function route() {
 function showView(name) {
   for (const v of ["chat", "prompts", "cards", "settings"]) $(`view-${v}`).hidden = v !== name;
   document.documentElement.dataset.view = name;
+  applyMaterial();
   if (name !== "chat") $(`view-${name}`).querySelector("h1")?.focus({ preventScroll: true });
 }
 
