@@ -52,7 +52,7 @@ function render() {
         <div class="readable-group">
           ${slider("dim", "dim", bg.dim, 0, 0.8, 0.05, "darkens the photo")}
           ${slider("window", "window", win, 0.3, 0.95, 0.01, "how dark the reading column is")}
-          <button type="button" class="btn raised press" data-readable aria-label="Reset dim and window to their defaults">back to readable</button>
+          <button type="button" class="btn raised press" data-readable>back to readable</button>
         </div>
         <p class="meta small">Low dim and window can make the story hard to read over a bright photo. Back to readable puts both back.</p>
       </section>
