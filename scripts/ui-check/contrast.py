@@ -15,6 +15,8 @@ for key, r in R.items():
     A = np.asarray(Image.open(f'{OUT}/{slug}-B.png').convert('RGB')).astype(float)
     H, W = A.shape[:2]; bad = []
     for t in r['texts']:
+        # WCAG contrast requirements do not apply to inactive/disabled controls.
+        if t.get("disabled", False): continue
         x0, y0 = max(0, int(t['x'])), max(0, int(t['y'])); x1, y1 = min(W, int(t['x'] + t['w'] + 1)), min(H, int(t['y'] + t['h'] + 1))
         if x1 - x0 < 2 or y1 - y0 < 2: continue
         patch = A[y0:y1, x0:x1].reshape(-1, 3); L = lum(patch); tc = np.array(t['c'], float)
