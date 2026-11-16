@@ -19,6 +19,7 @@
  */
 
 import { fillMacros, type MacroEnv } from "./macros.ts";
+import { latestUserPost } from "./nudges.ts";
 import type { Card, ChatMessage, Message, PromptBlock } from "./types.ts";
 
 export { listNames } from "./macros.ts";
@@ -95,6 +96,7 @@ export function assemblePrompt(input: PromptInput): AssembledPrompt {
     lastUserMessage: lastOf("user"),
     lastCharMessage: lastOf("assistant"),
     messageCount: history.length,
+    lastUserPost: latestUserPost(history),
     now: input.now ?? new Date(),
     vars: { ...input.vars },
     globals: { ...input.globals },

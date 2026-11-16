@@ -444,9 +444,11 @@ export class Store {
     const title = typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 200) : "New block";
     if (raw.content !== undefined && typeof raw.content !== "string") throw new ValidationError("A block's text must be text.");
     const role = raw.role === undefined ? "system" : checkRole(raw.role);
+    const depth = raw.depth === undefined || raw.depth === null ? null : Number(raw.depth);
+    if (depth !== null && (!Number.isInteger(depth) || depth < 0 || depth > 999)) throw new ValidationError("Depth is a whole number of messages from the end, 0 to 999.");
     this.db.transaction(() => {
       this.db.query("UPDATE prompt_blocks SET position = position + 1 WHERE chat_id = ? AND position >= ?").run(chatId, at);
-      this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, position) VALUES (?, ?, 'text', ?, ?, ?, ?)").run(id, chatId, title, (raw.content as string) ?? "", role, at);
+      this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, depth, position) VALUES (?, ?, 'text', ?, ?, ?, ?, ?)").run(id, chatId, title, (raw.content as string) ?? "", role, depth, at);
     })();
     return this.block(id);
   }
