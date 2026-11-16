@@ -241,7 +241,7 @@ dialog.glass{background-color:rgba(10,9,14,.94)}
 .bnote.warn{color:var(--danger-ink)}
 .bactions{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
 .bactions .meta{margin-left:4px}
-.add-row{display:flex;gap:10px;padding:16px 0 0 34px}
+.add-row{display:flex;flex-wrap:wrap;gap:10px;padding:16px 0 0 34px}
 .add-row .btn{border-radius:14px}
 @media (max-width:899px){.add-row{padding:12px 0 0}.add-row .btn{flex:1;height:48px}.bbody{padding:4px 0 2px}}
 /* phone rows: two lines, as on the phone boards */

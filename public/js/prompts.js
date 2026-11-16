@@ -772,6 +772,16 @@ async function onSubmit(e) {
   await save(b, form.querySelector("textarea").value, form.querySelector("input")?.value ?? null);
 }
 
+/** A ready-made nudge (src/nudges.ts): a block right after your post, as you. */
+async function addNudge(preset, opener) {
+  const block = await attempt(() => api("POST", `/api/chats/${state.chatId}/blocks`, { preset }));
+  if (!block) return;
+  blocks = await api("GET", `/api/chats/${state.chatId}/blocks`);
+  open.add(block.id);
+  render();
+  opener.focus();
+}
+
 async function addBlock() {
   const block = await attempt(() => api("POST", `/api/chats/${state.chatId}/blocks`, { title: "New block", content: "" }));
   if (!block) return;
@@ -793,6 +803,7 @@ export function wirePrompts() {
   $("prompts-back").innerHTML = icon.left(20);
   $("add-block").innerHTML = `${icon.plus(16)}text block`;
   $("add-block").addEventListener("click", addBlock);
+  for (const b of document.querySelectorAll("[data-nudge]")) b.addEventListener("click", () => addNudge(b.dataset.nudge, b));
   const list = $("block-list");
   list.addEventListener("click", onClick);
   list.addEventListener("submit", onSubmit);

@@ -339,3 +339,13 @@ describe("the login", () => {
     expect(response.status).toBe(403);
   });
 });
+
+test("nudges: adding one makes a block right after your post, as you", async () => {
+  const { chat } = await setUp();
+  const pace = (await call("POST", `/api/chats/${chat.id}/blocks`, { preset: "pace" })).data;
+  expect(pace).toMatchObject({ title: "Match my pace", role: "user", depth: 0, content: "{{paceNote}}" });
+  expect((await call("POST", `/api/chats/${chat.id}/blocks`, { preset: "nope" })).status).toBe(400);
+  await call("POST", `/api/chats/${chat.id}/send`, { content: "Hi Ada. Long day?" });
+  const sent = received.at(-1)!.messages;
+  expect(sent.at(-1)!.content).toContain("My post was about 4 words, in one paragraph");
+});

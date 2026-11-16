@@ -13,6 +13,7 @@ import { addressOf, cookieFor, isPublicPath, Login, overHttps, tokenOf } from ".
 import { ApiError, CancelledError, createChatCompletion, listModels, type ApiOptions } from "./nanogpt.ts";
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
+import { NUDGES } from "./nudges.ts";
 import { runTurn } from "./agent.ts";
 import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
@@ -179,7 +180,16 @@ export function createApp(config: Config): App {
     // The prompts page: a chat's blocks.
     if ((p = m("/api/chats/:id/blocks"))) {
       if (method === "GET") return json(store.blocks(p[0]!));
-      if (method === "POST") return json(store.createBlock(p[0]!, await body()));
+      if (method === "POST") {
+        const b = await body();
+        // A nudge: a ready-made block (src/nudges.ts).
+        if (b.preset !== undefined) {
+          const preset = typeof b.preset === "string" ? NUDGES[b.preset] : undefined;
+          if (!preset) throw new ValidationError(`There's no nudge called ${String(b.preset)}.`);
+          return json(store.createBlock(p[0]!, { ...preset }));
+        }
+        return json(store.createBlock(p[0]!, b));
+      }
       if (method === "PUT") return json(store.orderBlocks(p[0]!, (await body()).ids));
     }
     if ((p = m("/api/blocks/:id"))) {

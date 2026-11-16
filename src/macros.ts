@@ -8,6 +8,7 @@
  *
  *   names       {{user}} {{char}} ({{charName}}) {{cast}} ({{group}})
  *   chat        {{lastMessage}} {{lastUserMessage}} {{lastCharMessage}} {{messageCount}}
+ *   pace        {{paceNote}} {{lastUserWords}} {{lastUserParagraphs}} {{paceLimit}} (Anoesia's own, see nudges.ts)
  *   time        {{date}} {{time}} {{weekday}} {{isodate}} {{isotime}}
  *   random      {{random::a::b}} {{random::1::10}} {{pick::a::b}} {{roll::2d6}}
  *   variables   {{setvar::k::v}} {{getvar::k}} {{addvar::k::n}} {{incvar::k}} {{decvar::k}}
@@ -20,6 +21,8 @@
  * filled first (`{{setvar::mood::{{pick::calm::tense}}}}`).
  */
 
+import { paceNote, paceOf, paragraphsText } from "./nudges.ts";
+
 export interface MacroEnv {
   user: string;
   char: string;
@@ -28,6 +31,8 @@ export interface MacroEnv {
   lastUserMessage: string;
   lastCharMessage: string;
   messageCount: number;
+  /** Your latest post (the run of your messages at the end), or "" when the chat ends on a reply. */
+  lastUserPost?: string;
   now: Date;
   /** This chat's variables. Changed in place by setvar and friends. */
   vars: Record<string, string>;
@@ -52,6 +57,7 @@ export const KNOWN_MACROS = [
   "setvar", "getvar", "addvar", "incvar", "decvar", "hasvar", "varexists", "deletevar", "flushvar",
   "setgvar", "setglobalvar", "getgvar", "getglobalvar", "addgvar", "addglobalvar", "incgvar", "incglobalvar", "decgvar", "decglobalvar", "hasgvar", "hasglobalvar", "gvarexists", "deletegvar", "flushgvar", "deleteglobalvar", "flushglobalvar",
   "newline", "nl", "n", "space", "noop", "comment", "note", "//",
+  "pacenote", "lastuserwords", "lastuserparagraphs", "pacelimit",
 ];
 
 /**
@@ -166,6 +172,14 @@ function evaluate(inner: string, env: MacroEnv): string | null {
     case "messagecount":
     case "message_count":
       return String(env.messageCount);
+    case "pacenote":
+      return paceNote(env.lastUserPost ?? "");
+    case "lastuserwords":
+      return String(paceOf(env.lastUserPost ?? "").shownWords);
+    case "lastuserparagraphs":
+      return paragraphsText(paceOf(env.lastUserPost ?? "").paragraphs);
+    case "pacelimit":
+      return String(paceOf(env.lastUserPost ?? "").limit);
     case "date":
       return env.now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
     case "time":
