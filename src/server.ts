@@ -18,6 +18,7 @@ import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
 import { ConflictError, Workspace } from "./workspace.ts";
 import { PHOTO_TYPES, Store } from "./store.ts";
+import { Providers, VERTEX_REGIONS } from "./providers.ts";
 import type { AgentEdit, Message, ProviderId } from "./types.ts";
 
 export interface App {
@@ -40,6 +41,8 @@ export function createApp(config: Config): App {
   const photoDir = join(config.dataDir, "photos");
   mkdirSync(photoDir, { recursive: true });
   const api: ApiOptions = { apiKey: config.apiKey, baseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs, vertex: config.vertex };
+  // Keys saved in Settings override .env's, and every request reports how the provider answered.
+  const providers = new Providers(config, api);
   /** The reply being written in each chat, so Stop can end it and a second one can't start. */
   const running = new Map<string, AbortController>();
 
@@ -74,6 +77,29 @@ export function createApp(config: Config): App {
       return { content, profileId: profile.id, model: result.model };
     } finally {
       running.delete(chatId);
+    }
+  }
+
+  /** Send a profile one tiny request: does it answer, and how fast. A failure is a result here, not an error. */
+  async function testProfile(id: string): Promise<{ ok: boolean; ms: number | null; message: string }> {
+    const profile = store.profile(id);
+    if (!profile.model) throw new ValidationError("Choose a model for this profile first.");
+    const started = Date.now();
+    try {
+      await createChatCompletion(api, {
+        model: profile.model,
+        provider: profile.provider,
+        messages: [{ role: "user", content: "Reply with the single word: ready" }],
+        temperature: profile.temperature,
+        // Enough room for a reasoning model to think a little and still answer.
+        maxTokens: Math.min(profile.maxTokens, 400),
+        reasoningEffort: profile.reasoningEffort,
+        allowEmpty: true,
+      });
+      return { ok: true, ms: Date.now() - started, message: "" };
+    } catch (error) {
+      if (error instanceof ApiError) return { ok: false, ms: null, message: error.message };
+      throw error;
     }
   }
 
@@ -120,7 +146,8 @@ export function createApp(config: Config): App {
     let p: string[] | undefined;
 
     if (path === "/api/state" && method === "GET") {
-      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: Boolean(config.vertex.keyFile), apiKeySet: Boolean(config.apiKey), macros: KNOWN_MACROS, photos: store.photos() });
+      const pv = providers.views();
+      return json({ settings: store.settings(), profiles: store.profiles(), cards: store.cards(), chats: store.chats(), vertexReady: pv.vertex.set, apiKeySet: pv.nanogpt.set, providers: pv, regions: VERTEX_REGIONS, macros: KNOWN_MACROS, photos: store.photos() });
     }
 
     // Background photos: the image itself as the body, its name, tint and framing in the query.
@@ -147,6 +174,29 @@ export function createApp(config: Config): App {
       if (method === "PATCH") return json(store.updateProfile(p[0]!, await body()));
       if (method === "DELETE") return (store.deleteProfile(p[0]!), json({ ok: true }));
     }
+    // Providers: the nanoGPT key, Vertex AI's project, region and key file, and a test of each.
+    if (path === "/api/providers" && method === "GET") return json(providers.views());
+    if ((p = m("/api/providers/:id"))) {
+      const id = providerId(p[0]!);
+      if (method === "PUT") {
+        const b = await body();
+        if (id === "nanogpt") providers.setNanogptKey(b.key);
+        else providers.setVertex(b);
+        return json(providers.views());
+      }
+      if (method === "DELETE") return (providers.clear(id), json(providers.views()));
+    }
+    if ((p = m("/api/providers/:id/test")) && method === "POST") {
+      const id = providerId(p[0]!);
+      const settings = store.settings();
+      const using = store.profiles().filter((x) => x.provider === id && x.model);
+      // Test with the profile that writes replies or runs the agent if it's on this provider, else any with a model.
+      const profile = using.find((x) => x.id === settings.rpProfileId) ?? using.find((x) => x.id === settings.agentProfileId) ?? using[0];
+      if (!profile) throw new ValidationError(`No profile uses ${id === "vertex" ? "Vertex AI" : "nanoGPT"} with a model yet, so there's nothing to test it with. Make one, then test again.`);
+      const result = await testProfile(profile.id);
+      return json({ ...result, providers: providers.views() });
+    }
+    if ((p = m("/api/profiles/:id/test")) && method === "POST") return json({ ...(await testProfile(p[0]!)), providers: providers.views() });
     if (path === "/api/models" && method === "GET") {
       const provider = (url.searchParams.get("provider") ?? "nanogpt") as ProviderId;
       return json(await listModels(api, provider === "vertex" ? "vertex" : "nanogpt"));
@@ -352,6 +402,11 @@ export function createApp(config: Config): App {
   return { fetch, store, agent, close: () => db.close() };
 }
 
+function providerId(raw: string): ProviderId {
+  if (raw !== "nanogpt" && raw !== "vertex") throw new NotFoundError("provider");
+  return raw;
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof CancelledError) return "Stopped.";
   if (error instanceof NotFoundError || error instanceof ConflictError || error instanceof ValidationError || error instanceof ApiError) return error.message;
@@ -402,7 +457,7 @@ if (import.meta.main) {
   if (!loopback && !Bun.file(join(config.dataDir, "login.json")).size) {
     console.warn(`Warning: listening on ${config.host} with no password. Anyone who can reach it can open your chats. Set one with \`bun run set-password\`.`);
   }
-  if (!config.apiKey) console.log("No NANOGPT_API_KEY in .env yet: replies need it (or a Vertex AI profile).");
+  if (!config.apiKey) console.log("No NANOGPT_API_KEY in .env: add a key in Settings → Connections if you haven't.");
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
       app.close();

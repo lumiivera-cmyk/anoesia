@@ -106,7 +106,7 @@ function readKeyFile(keyFile: string): ServiceAccount {
   try {
     text = readFileSync(keyFile, "utf8");
   } catch {
-    throw new ApiError("Couldn't read the Vertex AI key file. Check GOOGLE_APPLICATION_CREDENTIALS in your .env file, and that gcp-key.json is in the Amaedori folder.");
+    throw new ApiError("Couldn't read the Vertex AI key file. Choose it again in Settings → Connections.");
   }
   let json: Partial<ServiceAccount> & { type?: unknown };
   try {

@@ -19,8 +19,16 @@ export const FINISHES = {
   shunkei: { label: "shunkei", hint: "clear coat, most photo", opacity: 0.5, blur: 14 },
 };
 
-/** "Back to readable": what dim and window go back to. */
+/** "Back to readable": what dim and window go back to (window null: the device's default). */
 export const READABLE = { dim: 0.3, window: null };
+
+/** The readable reading column: 0.72 on a wide screen, 0.7 on a phone. */
+export const windowDefault = () => (matchMedia("(max-width: 899px)").matches ? 0.7 : 0.72);
+
+/** Whether dim or the reading column is past (below) its readable default. */
+export function belowReadable(bg) {
+  return bg.dim < READABLE.dim - 1e-9 || (bg.window ?? windowDefault()) < windowDefault() - 1e-9;
+}
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
@@ -38,6 +46,8 @@ export function applyBackground(bg) {
   const finish = FINISHES[bg.finish] ?? FINISHES.tamenuri;
   root.style.setProperty("--lac", rgba(lac, 1));
   root.style.setProperty("--pane", rgba(pane, finish.opacity));
+  // The pane colour alone, for the finish swatches in Settings → Look.
+  root.style.setProperty("--pane-rgb", pane.join(" "));
   root.style.setProperty("--pane-filter", finish.blur ? `blur(${finish.blur}px) saturate(1.3)` : "none");
   root.style.setProperty("--dim", String(bg.dim));
   if (bg.window === null) root.style.removeProperty("--window-set");

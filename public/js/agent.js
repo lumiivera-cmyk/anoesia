@@ -8,7 +8,7 @@
  *   Files    agent/index.md, personality.md, notes/, chats/<chat>/
  */
 
-import { $, api, attempt, escapeHtml, formatText, loadState, state } from "./core.js";
+import { $, api, attempt, escapeHtml, formatText, loadState, sendsOnEnter, state } from "./core.js";
 import { openChat } from "./chat.js";
 import { renderSide } from "./side.js";
 
@@ -45,6 +45,13 @@ export async function toggleAgent(force) {
     else renderAll();
   } else renderAll();
   $("agent-input").focus();
+}
+
+/** Open the panel on one of its tabs (Settings → Agent's "open notes" and "open the log"). */
+export async function openAgentTab(tab) {
+  agent.tab = tab;
+  if (tab === "files") agent.filePath = null;
+  await toggleAgent(true);
 }
 
 async function refreshList() {
@@ -156,7 +163,7 @@ function renderChat() {
     log.innerHTML = `<div class="agent-empty muted small">
       <p>Ask the agent to read, search or revise your cards, prompts and chats, or to draft something into its notes.</p>
       <p>It changes things only when you ask. Every change shows here as a diff you can revert.</p>
-      ${state.settings?.agentProfileId ? "" : "<p><strong>First pick a profile for it in Settings → Agent.</strong></p>"}
+      ${state.settings?.agentProfileId ? "" : "<p><strong>First pick a profile for it in Settings → Connections.</strong></p>"}
     </div>`;
     return;
   }
@@ -322,7 +329,7 @@ export function wireAgent() {
     send($("agent-input").value);
   });
   $("agent-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && matchMedia("(pointer: fine)").matches) {
+    if (sendsOnEnter(e)) {
       e.preventDefault();
       send($("agent-input").value);
     }

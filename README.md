@@ -26,7 +26,22 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   lets the narrator go on.
 - **Preview**: exactly what the model gets next, block by block (with each
   block's role and source) or as sent.
-- **Connection profiles** on nanoGPT or Google Vertex AI, from Amaedori.
+- **Settings**, a page of its own (the sidebar's Settings, or the chats
+  drawer on a phone), in four sections, each with a live one-line summary
+  in the section list:
+  - **Connections**: which profile writes story replies and which runs the
+    agent, with each one's status from its last real request ("connected ·
+    1.4 s", or "failing · key rejected" with a "fix the key" button);
+    profiles, each with a searchable model list from the provider,
+    temperature, longest reply, and Top P, min P, reasoning and extra JSON
+    under "more controls"; and the providers: the nanoGPT key, and Vertex
+    AI's project, region and service account key, each with a test. Keys
+    set here are kept in the data folder (readable by the server only) and
+    win over `.env`; only a key's last four characters come back to the page.
+  - **Look**: the background, with a live preview (below).
+  - **Agent**: what it runs on, its notes and its edit log.
+  - **Typing**: Enter sends on a computer, or adds a line (then Ctrl+Enter
+    sends). On a phone Enter always adds a line.
 - **The prompts page**: every block of a chat's prompt, in send order. The
   main prompt, each card field, your own text blocks, and the chat history
   are blocks you drag (or move with arrows) into any order, per chat. Each
@@ -45,7 +60,7 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   `{{space}}`, `{{noop}}` and `{{// comments}}`. Variables change only when a
   prompt is really sent, never on Preview.
 - **The agent** (the Agent button), modelled on LumiAgent. It has its own
-  profile (Settings → "The agent thinks with"), so it can be a tool-calling
+  profile (Settings → Connections → the agent), so it can be a tool-calling
   model while another writes replies. It sees Anoesia as paths:
   `cards/<card>/<field>`, `prompt/main`, `chats/<chat>/messages/<n>`,
   `chats/<chat>/blocks/<block>`, and its own files under `agent/`
@@ -61,11 +76,13 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 - **A login**, for running it on a server (see [hosting](docs/hosting.md)).
 
 - **The lacquer design**: black lacquer panels over a night-city photo, the
-  same on phone and desktop. In settings, add your own photos (they're kept
-  in the data folder, behind the login, and never in git), pick one or none, the
-  finish (roiro, tamenuri or shunkei), how much the photo tints the panels,
-  how dim it is and how much it shows through. "Back to readable" puts dim
-  and window back. Each card has a bead colour: violet, blue, pink or any
+  same on phone and desktop. In Settings → Look, add your own photos (they're
+  kept in the data folder, behind the login, and never in git), pick one or
+  none, the finish (roiro, tamenuri or shunkei), how much the photo tints the
+  panels, how dim it is and how much it shows through. "Back to readable" puts
+  dim and window back. Settings itself never gets dimmer or more see-through
+  than the readable defaults, so you can always read your way back; the
+  preview shows the real result. Each card has a bead colour: violet, blue, pink or any
   colour from the picker.
 - **The cards page**: every card by kind, its fields in send order (drag the
   bumps, use the arrow keys, or tap them for move options), where it's used,
@@ -84,7 +101,7 @@ You need [Bun](https://bun.sh) and a nanoGPT API key (or Vertex AI).
 git clone https://github.com/lumiivera-cmyk/anoesia.git
 cd anoesia
 bun install          # only for tests and type checking
-cp .env.example .env # then set NANOGPT_API_KEY
+cp .env.example .env # optional: NANOGPT_API_KEY, or add the key in Settings
 bun start
 ```
 

@@ -37,6 +37,11 @@ export interface ApiOptions {
   vertex?: VertexOptions;
   /** Which provider `apiKey` and `baseUrl` are for. Left out: nanoGPT. */
   provider?: ProviderId;
+  /**
+   * Told how each chat completion went at the provider: answered (and how
+   * fast) or failed (and why). Settings shows it as the connection's status.
+   */
+  onResult?: (provider: ProviderId, outcome: { ok: boolean; ms: number | null; status?: number | null; message?: string }) => void;
 }
 
 /** Request fields Vertex AI doesn't take, left out of every request to it. */
@@ -54,17 +59,17 @@ function providerName(options: Pick<ApiOptions, "provider">): string {
 export function optionsFor(options: ApiOptions, provider: ProviderId | undefined): ApiOptions {
   if (provider !== "vertex") {
     if (!options.apiKey) {
-      throw new ApiError("No nanoGPT API key is set. Set NANOGPT_API_KEY in .env, then restart the server.");
+      throw new ApiError("No nanoGPT API key is set. Add one in Settings → Connections.");
     }
     return options;
   }
   const vertex = options.vertex;
   if (!vertex?.keyFile || !vertex.baseUrl) {
     throw new ApiError(
-      "Google Vertex AI isn't set up. Add GOOGLE_APPLICATION_CREDENTIALS (the key file, gcp-key.json) and GOOGLE_CLOUD_PROJECT to .env, then restart the server.",
+      "Google Vertex AI isn't set up. Add its project and service account key in Settings → Connections.",
     );
   }
-  return { apiKey: vertex.keyFile, baseUrl: vertex.baseUrl, timeoutMs: options.timeoutMs, vertex, provider: "vertex" };
+  return { apiKey: vertex.keyFile, baseUrl: vertex.baseUrl, timeoutMs: options.timeoutMs, vertex, provider: "vertex", onResult: options.onResult };
 }
 
 /** A tool the model may call, in the API's format (see `src/tools.ts`). */
@@ -184,7 +189,16 @@ export async function createChatCompletion(
   // The request body. Note the API uses snake_case (`max_tokens`), while
   // our own code uses camelCase (`maxTokens`).
   const body = requestBody(request);
-  const json = await postJson(target, "/chat/completions", body, request.signal);
+  const started = Date.now();
+  const provider = target.provider ?? "nanogpt";
+  let json: unknown;
+  try {
+    json = await postJson(target, "/chat/completions", body, request.signal);
+  } catch (error) {
+    if (error instanceof ApiError) target.onResult?.(provider, { ok: false, ms: null, status: error.status ?? null, message: error.message });
+    throw error;
+  }
+  target.onResult?.(provider, { ok: true, ms: Date.now() - started });
 
   // Dig the text out of the response. Everything is checked because a model
   // provider having a bad day can return all sorts of shapes.
@@ -492,13 +506,13 @@ function describeHttpError(status: number, body: string, options: ApiOptions): s
   const hints: Record<number, string> =
     options.provider === "vertex"
       ? {
-          401: "Google Vertex AI didn't accept the sign-in token. Check that GOOGLE_APPLICATION_CREDENTIALS in your .env file points at a current service account key, then restart.",
+          401: "Google Vertex AI didn't accept the sign-in token. Check the service account key in Settings → Connections is a current one.",
           403: 'Google Vertex AI refused the service account. In Google Cloud, give it the "Agent Platform User" role (IAM), and check the "Agent Platform API" is enabled for GOOGLE_CLOUD_PROJECT.',
           404: "Google Vertex AI doesn't recognise that model id, or it isn't offered in GOOGLE_CLOUD_LOCATION. Model ids look like google/gemini-2.5-pro.",
           429: "Google Vertex AI says you're over your quota or out of credit. Wait a moment and try again, or check billing in Google Cloud.",
         }
       : {
-          401: "nanoGPT rejected the API key. Check NANOGPT_API_KEY in your .env file.",
+          401: "nanoGPT rejected the API key: it's invalid or revoked.",
           402: "nanoGPT says your balance is too low.",
           404: "nanoGPT doesn't recognise that model id. Check the model in settings.",
           429: "nanoGPT is rate-limiting you. Wait a moment and try again.",

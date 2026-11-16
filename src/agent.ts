@@ -98,7 +98,7 @@ export interface TurnInput {
 export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Workspace; api: ApiOptions }, input: TurnInput): Promise<TurnResult> {
   const { store, agent, ws, api } = deps;
   const settings = store.settings();
-  if (!settings.agentProfileId) throw new ValidationError("Pick a profile for the agent first (Settings → Agent).");
+  if (!settings.agentProfileId) throw new ValidationError("Pick a profile for the agent first (Settings → Connections).");
   const profile = store.profile(settings.agentProfileId);
   if (!profile.model) throw new ValidationError(`The profile "${profile.name}" has no model yet.`);
   const text = input.text.trim();

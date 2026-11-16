@@ -110,6 +110,8 @@ export interface Settings {
   background: Background;
   /** The profile the agent thinks with (empty until one is picked). */
   agentProfileId: string;
+  /** On a computer, Enter sends and Shift+Enter adds a line (true), or Enter adds a line and Ctrl+Enter sends (false). Phones always add a line. */
+  enterSends: boolean;
 }
 
 /** A background photo you uploaded. The file is in the data folder, served at `url`. */

@@ -23,12 +23,35 @@ const card = (n) => async (p) => nav(p, "#/cards/" + (await cardId(p, n)));
 const then = (a, ...fs) => async (p) => { await a(p); for (const f of fs) await f(p); };
 const tap = (sel) => (p) => click(p, sel);
 const prompts = async (p) => { await chat("Backstage")(p); await nav(p, "#/prompts"); };
+// Settings: a page of its own. Some screens need the server put in a state first.
+const send = (method, path, body) => async (p) => { await home(p); await p.evaluate(async ([m, u, b]) => { await fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }); }, [method, "http://127.0.0.1:4950" + path, body]); await p.reload(); await p.waitForTimeout(300); };
+const settings = (h = "") => then(chat("Backstage"), async (p) => nav(p, "#/settings" + h));
+const failingKey = then(send("PUT", "/api/providers/nanogpt", { key: "bad" }), send("POST", "/api/providers/nanogpt/test", {}));
+const editor = then(settings("/connections"), tap(".prof"));
+const SETTINGS = (phone) => [
+  [phone ? "settings sections" : "settings", settings()],
+  ["settings connections", settings("/connections")],
+  ["settings failing", then(failingKey, settings("/connections"))],
+  ["settings fix the key", then(failingKey, settings("/connections"), tap("[data-fix]"))],
+  ["settings vertex setup", then(settings("/connections"), tap('[data-setup="vertex"]'))],
+  ["settings region menu", then(settings("/connections"), tap('[data-setup="vertex"]'), tap("#vreg-b"))],
+  ["settings story menu", then(settings("/connections"), tap('[data-assign="story"]'))],
+  ["settings profile", editor],
+  ["settings profile more", then(editor, tap("[data-more]"))],
+  ["settings new profile", then(settings("/connections"), tap("[data-new-profile]"))],
+  ["settings picking a model", then(editor, tap("#model-b"))],
+  ["settings look", settings("/look")],
+  ["settings look below readable", then(send("PATCH", "/api/settings", { background: { dim: 0.1, window: 0.4 } }), settings("/look"))],
+  ["settings agent", settings("/agent")],
+  ["settings typing", settings("/typing")],
+];
 const SCREENS = {
   desk: [
     ["chat", chat("Backstage")],
     ["chat empty", chat("Night market")],
     ["chat settings", then(chat("Backstage"), tap("#open-chat-settings"))],
-    ["settings", then(chat("Backstage"), tap("#side [data-open-settings]"))],
+    ["settings from the sidebar", then(chat("Backstage"), tap('#side a[href="#/settings"]'))],
+    ...SETTINGS(false),
     ["prompts", prompts],
     ["prompts sent", then(prompts, tap("#pv-sent"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -46,7 +69,8 @@ const SCREENS = {
     ["chat menu", then(chat("Backstage"), tap("#open-chat-menu"))],
     ["message menu", then(chat("Backstage"), tap("#messages .msg:last-of-type .msg-body"))],
     ["chat settings", then(chat("Backstage"), tap("#phone-title"))],
-    ["settings", then(chat("Backstage"), tap("#open-drawer"), tap("#drawer [data-open-settings]"))],
+    ["settings from the drawer", then(chat("Backstage"), tap("#open-drawer"), tap('#drawer a[href="#/settings"]'))],
+    ...SETTINGS(true),
     ["prompts", prompts],
     ["prompts preview", then(prompts, tap("#tab-preview"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],

@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: Settings = {
   mainPrompt: DEFAULT_MAIN_PROMPT,
   background: DEFAULT_BACKGROUND,
   agentProfileId: "",
+  enterSends: true,
 };
 
 export const PHOTO_TYPES: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
@@ -88,6 +89,10 @@ export class Store {
       if (typeof raw.agentProfileId !== "string") throw new ValidationError("agentProfileId must be text");
       if (raw.agentProfileId && !this.findProfile(raw.agentProfileId)) throw new NotFoundError("profile");
       clean.agentProfileId = raw.agentProfileId;
+    }
+    if (raw.enterSends !== undefined) {
+      if (typeof raw.enterSends !== "boolean") throw new ValidationError("enterSends must be true or false.");
+      clean.enterSends = raw.enterSends;
     }
     if (raw.mainPrompt !== undefined) {
       if (typeof raw.mainPrompt !== "string") throw new ValidationError("The main prompt must be text.");

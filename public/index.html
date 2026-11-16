@@ -9,9 +9,11 @@
       #view-chat     the open chat: header, messages, composer
       #view-prompts  this chat's prompt: blocks in send order, and the preview
       #view-cards    the card library and the card editor
-    dialogs          drawer, menus, sheets, settings, chat settings, import, editors
+      #view-settings connections and profiles, look, agent, typing
+    dialogs          drawer, menus, sheets, chat settings, import, editors
 
-  Pages are hash routes (#/chat/<id>, #/prompts, #/cards/<id>); js/main.js
+  Pages are hash routes (#/chat/<id>, #/prompts, #/cards/<id>,
+  #/settings/<section>, #/settings/profile/<id>); js/main.js
   starts it all.
 -->
 <html lang="en" class="theme-lacquer">
@@ -142,6 +144,21 @@
             <section class="col rail scroll" id="card-rail" aria-label="Where this card is used" tabindex="0"></section>
           </div>
         </section>
+
+        <!-- Settings -->
+        <section class="view view-page view-settings" id="view-settings" aria-labelledby="settings-title" hidden>
+          <header class="page-head">
+            <a class="ghost press ib phone-only" id="settings-back" href="#/" aria-label="Back"></a>
+            <div class="page-title">
+              <h1 class="disp" id="settings-title">Settings</h1>
+              <span class="meta wide-only">changes save as you make them</span>
+            </div>
+          </header>
+          <div class="set-cols">
+            <nav class="set-nav scroll" id="settings-nav" aria-label="Settings sections" tabindex="0"></nav>
+            <section class="set-main scroll" id="settings-main" tabindex="0"><div class="set-in" id="settings-body"></div></section>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -226,7 +243,9 @@
     </dialog>
 
     <dialog class="ov dlg raised wide-dlg" id="chat-dialog" aria-labelledby="chat-dialog-title"></dialog>
-    <dialog class="ov dlg raised wide-dlg" id="settings-dialog" aria-labelledby="settings-title"></dialog>
+    <!-- Settings: the profile and region lists, and the model list (a combobox over a listbox). -->
+    <dialog class="ov menu raised pop sheet-on-phone pick-menu" id="pick-menu" aria-label="Choose"></dialog>
+    <dialog class="ov raised pop sheet-on-phone mpick" id="model-picker" aria-label="Choose a model"></dialog>
     <dialog class="ov dlg raised wide-dlg" id="import-dialog" aria-labelledby="import-title"></dialog>
 
     <div class="toast raised" id="toast" role="alert" hidden>
