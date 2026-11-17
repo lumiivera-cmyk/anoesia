@@ -757,7 +757,13 @@ html.sel .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),var(--dim-floor,.3)))}
   .sel .set-cols,.sel .cards-cols,.sel .prompts-cols{margin-top:20px;padding-top:0;gap:20px}
   /* chat: header and composer plates around the story, which stands on the dimmed photo (no
      reading column on a wide screen; theme.js hasWindow) */
-  .sel .view-chat{background:none!important}
+  .sel .view-chat{background:none!important;position:relative}
+  /* the board's fixed dark backdrop behind the story, between the header and composer plates */
+  .sel .view-chat::before{content:"";position:absolute;left:4px;right:4px;top:86px;bottom:134px;background:rgba(5,5,8,.9);border-radius:40px;filter:blur(22px);pointer-events:none}
+  .sel .msgs-scroll{position:relative}
+  /* the header plate keeps one row: the cast scrolls sideways when the agent narrows it */
+  .sel .chat-head .chat-title{flex:none}
+  .sel .chat-head .cast-chips{flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
   .sel .chat-head{margin-bottom:6px}
   .sel .msgs-scroll{padding-top:22px}
   .sel .composer-wrap{padding:0;margin-top:6px}
@@ -791,4 +797,6 @@ html.sel .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),var(--dim-floor,.3)))}
   .sel .set-nav,.sel .set-main{padding:10px 30px 32px 14px}
   .sel .agent-panel{inset:max(6px,env(safe-area-inset-top)) 6px max(6px,env(safe-area-inset-bottom));width:auto;padding:18px 16px}
   .sel dialog.mpick{padding:50px 18px max(18px,env(safe-area-inset-bottom))!important}
+  /* sheets on their plate: content starts below the plate's frosted top edge, as on the boards */
+  .sel dialog.on-plate.sheet-on-phone:not(.mpick),.sel dialog#chat-menu.on-plate{padding:44px 14px max(16px,env(safe-area-inset-bottom))!important}
 }

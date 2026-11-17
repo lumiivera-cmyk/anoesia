@@ -129,7 +129,7 @@ const TEXTS = `() => { const out = [];
     let setupErr = null;
     try { await setup(p); } catch (e) { setupErr = String(e).split("\n")[0]; }
     // selenite plates paint in a worker: measure once they're up (the click test doesn't need them)
-    await p.waitForFunction(() => !document.querySelector(".plate.pending"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
+    await p.waitForFunction(() => !document.querySelector(".plate.pending:not([hidden])"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
     const r = { errors: [...errs], setupErr };
     await p.addScriptTag({ path: AXE });
     r.axe = await p.evaluate(async () => { const top = [...document.querySelectorAll("dialog[open]")].pop();
@@ -167,7 +167,7 @@ const TEXTS = `() => { const out = [];
     }
     results[key] = r;
     const bad = r.clicks.filter((c) => c[1] !== "ok");
-    console.log(`${key}: ${setupErr ? "SETUP " + setupErr + " " : ""}errors ${r.errors.length}, axe ${r.axe.reduce((a, v) => a + v.count, 0)} in ${r.axe.length} rules, controls ${r.clicks.length} (${bad.length} flagged), trunc ${r.layout.trunc.length}, spill ${r.layout.spill.length}, offboard ${r.layout.offboard.length}, small ${r.layout.small.length}, clip384 ${r.layout.clip384.length}`);
+    console.log(`${key}: ${setupErr ? "SETUP " + setupErr + " " : ""}errors ${r.errors.length}, axe ${r.axe.reduce((a, v) => a + v.count, 0)} in ${r.axe.length} rules, controls ${r.clicks.length} (${bad.length} flagged), trunc ${r.layout.trunc.length}, spill ${r.layout.spill.length}, offboard ${r.layout.offboard.length}, small ${r.layout.small.length}, clip384 ${r.layout.clip384.length}${r.errors.length ? "\n  " + r.errors.join("\n  ") : ""}`);
     await ctx.close();
   }
   await b.close();
