@@ -289,7 +289,7 @@ const TOOLS: Record<string, (args: Args, env: ToolEnv) => ToolResult> = {
 
   resolve_macros(args, env) {
     const chatId = chatOf(env, args.chat);
-    const probe: PromptBlock = { id: "__probe", chatId, kind: "text", cardId: null, fieldId: null, title: "probe", content: text(args.text, "text"), role: "system", enabled: true, depth: null, position: 1e9 };
+    const probe: PromptBlock = { id: "__probe", chatId, kind: "text", cardId: null, fieldId: null, title: "probe", content: text(args.text, "text"), role: "system", enabled: true, depth: null, position: 1e9, offstage: false };
     const prompt = buildPreview(env, chatId, probe);
     return { text: prompt.blocks.find((b) => b.source === "block:__probe")?.content ?? "(empty)" };
   },

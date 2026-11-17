@@ -210,7 +210,9 @@ describe("the prompts page", () => {
     const extra = (await call("POST", "/api/cards", { name: "Bobby", fields: [{ key: "description", content: "The manager." }] })).data;
     await call("PATCH", `/api/chats/${chat.id}`, { cast: [...cast.filter((id) => id !== cast[2]), extra.id] });
     let blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
-    expect(blocks.at(-2)).toMatchObject({ cardId: extra.id, title: "System prompt" });
+    // Just before the history, ahead of the chat's notes.
+    expect(blocks.slice(-4).map((b: any) => b.title)).toEqual(["System prompt", "Right now", "Who knows what", "Chat history"]);
+    expect(blocks.at(-4)).toMatchObject({ cardId: extra.id });
     expect(blocks.some((b: any) => b.cardId === cast[2])).toBe(false);
 
     const ada = (await call("GET", "/api/state")).data.cards.find((c: any) => c.id === cast[5]);
@@ -231,6 +233,58 @@ describe("the prompts page", () => {
     await call("POST", `/api/chats/${chat.id}/send`, { content: "One." });
     await call("POST", `/api/chats/${chat.id}/send`, { content: "Two." });
     expect(received.at(-1)!.messages[0]!.content).toContain("Turn 2.");
+  });
+});
+
+describe("cast presence", () => {
+  test("offstage: only the Description goes in, {{cast}} skips them, and the blocks say so", async () => {
+    const { chat, cast } = await setUp();
+    const [, , bo, cy, , ada] = cast;
+    const changed = (await call("PATCH", `/api/chats/${chat.id}`, { offstage: [bo, cy] })).data;
+    expect(changed.offstage).toEqual([bo, cy]);
+    const preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    const labels = preview.blocks.map((b: any) => b.label);
+    // Ada (onstage) keeps her whole card; Bo and Cy send their Description only.
+    expect(labels).toContain("Ada Vale: Advanced description");
+    expect(labels).toContain("Bo: Description");
+    expect(labels).not.toContain("Bo: Voice bank");
+    expect(labels).toContain("Cy: Description");
+    expect(preview.blocks[0].content).toContain("everyone in it: Ada Vale.");
+    const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    expect(blocks.filter((b: any) => b.offstage).map((b: any) => b.cardId)).toEqual(expect.arrayContaining([bo, cy]));
+    expect(blocks.some((b: any) => b.cardId === ada && b.offstage)).toBe(false);
+
+    // Reordering the cast keeps who's offstage; leaving the cast forgets it.
+    const reordered = (await call("PATCH", `/api/chats/${chat.id}`, { cast: [...cast].reverse() })).data;
+    expect(reordered.offstage.sort()).toEqual([bo, cy].sort());
+    const fewer = (await call("PATCH", `/api/chats/${chat.id}`, { cast: cast.filter((id) => id !== bo) })).data;
+    expect(fewer.offstage).toEqual([cy]);
+    const back = (await call("PATCH", `/api/chats/${chat.id}`, { cast })).data;
+    expect(back.offstage).toEqual([cy]);
+    expect((await call("PATCH", `/api/chats/${chat.id}`, { offstage: ["not-in-cast"] })).status).toBe(400);
+  });
+});
+
+describe("chat notes", () => {
+  test("a new chat has both notes, empty and left out of the preview; filled, one is sent", async () => {
+    const { chat } = await setUp();
+    const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    const notes = blocks.filter((b: any) => b.kind === "note");
+    expect(notes.map((b: any) => [b.title, b.content, b.role])).toEqual([
+      ["Right now", "", "system"],
+      ["Who knows what", "", "system"],
+    ]);
+    expect(blocks.at(-2).title).toBe("Who knows what");
+    let preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    expect(preview.blocks.some((b: any) => b.label === "Right now" || b.label === "Who knows what")).toBe(false);
+
+    await call("PATCH", `/api/blocks/${notes[0].id}`, { content: "Backstage after the show. {{user}} has the setlist." });
+    preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    expect(preview.blocks.find((b: any) => b.label === "Right now").content).toBe("## Right now\n\nBackstage after the show. Hana has the setlist.");
+    expect(preview.blocks.some((b: any) => b.label === "Who knows what")).toBe(false);
+
+    expect((await call("DELETE", `/api/blocks/${notes[0].id}`)).status).toBe(400);
+    expect((await call("PATCH", `/api/blocks/${notes[0].id}`, { title: "Mine" })).status).toBe(400);
   });
 });
 
@@ -265,7 +319,7 @@ describe("cards", () => {
     const moved = (await call("PATCH", `/api/cards/${card.id}`, { fields: [sys, desc, custom, adv] })).data;
     expect(moved.fields.map((f: any) => f.key)).toEqual(["system", "description", "custom", "advanced"]);
     blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
-    expect(blocks.map((b: any) => b.title)).toEqual(["Main prompt", "System prompt", "Description", "Advanced description", "Chat history", "Voice bank"]);
+    expect(blocks.map((b: any) => b.title)).toEqual(["Main prompt", "System prompt", "Description", "Advanced description", "Right now", "Who knows what", "Chat history", "Voice bank"]);
   });
 
   test("a card's colour is a preset or a hex, and a custom colour is remembered", async () => {

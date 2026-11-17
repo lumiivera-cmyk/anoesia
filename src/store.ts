@@ -8,7 +8,7 @@
 import type { Database } from "bun:sqlite";
 import { DEFAULT_FIELDS, type ParsedCard } from "./cards.ts";
 import { NotFoundError, ValidationError, newId } from "./errors.ts";
-import { DEFAULT_MAIN_PROMPT } from "./prompt.ts";
+import { CHAT_NOTES, DEFAULT_MAIN_PROMPT } from "./prompt.ts";
 import type { Background, BlockKind, Card, CardField, Chat, FieldKey, Finish, Message, Photo, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
 
 const now = () => new Date().toISOString();
@@ -332,10 +332,15 @@ export class Store {
   }
 
   private toChat(row: Row): Chat {
-    const cast = (this.db.query("SELECT card_id FROM chat_cast WHERE chat_id = ? ORDER BY position").all(row.id as string) as { card_id: string }[]).map(
-      (c) => c.card_id,
-    );
-    return { id: row.id as string, name: row.name as string, cast, createdAt: row.created_at as string, updatedAt: row.updated_at as string };
+    const rows = this.db.query("SELECT card_id, onstage FROM chat_cast WHERE chat_id = ? ORDER BY position").all(row.id as string) as { card_id: string; onstage: number }[];
+    return {
+      id: row.id as string,
+      name: row.name as string,
+      cast: rows.map((c) => c.card_id),
+      offstage: rows.filter((c) => !c.onstage).map((c) => c.card_id),
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    };
   }
 
   createChat(raw: Row): Chat {
@@ -350,8 +355,20 @@ export class Store {
     const chat = this.chat(id);
     if (raw.name !== undefined) this.db.query("UPDATE chats SET name = ? WHERE id = ?").run(cleanName(raw.name), id);
     if (raw.cast !== undefined) this.setCast(id, raw.cast);
+    if (raw.offstage !== undefined) this.setOffstage(id, raw.offstage);
     void chat;
     return this.chat(id);
+  }
+
+  /** Put these cast members offstage in a chat, and everyone else in its cast onstage. */
+  private setOffstage(chatId: string, raw: unknown): void {
+    if (!Array.isArray(raw) || raw.some((c) => typeof c !== "string")) throw new ValidationError("offstage must be a list of card ids.");
+    const cast = this.chat(chatId).cast;
+    const stray = (raw as string[]).find((id) => !cast.includes(id));
+    if (stray) throw new ValidationError("Only cards in this chat's cast can go offstage.");
+    const off = new Set(raw as string[]);
+    const update = this.db.query("UPDATE chat_cast SET onstage = ? WHERE chat_id = ? AND card_id = ?");
+    this.db.transaction(() => cast.forEach((cardId) => update.run(off.has(cardId) ? 0 : 1, chatId, cardId)))();
   }
 
   /** Replace a chat's cast with these card ids, in this order. */
@@ -359,10 +376,12 @@ export class Store {
     if (!Array.isArray(raw) || raw.some((c) => typeof c !== "string")) throw new ValidationError("The cast must be a list of card ids.");
     const ids = [...new Set(raw as string[])];
     for (const cardId of ids) this.card(cardId);
+    // Whoever stays in the cast keeps their place on or off stage; newcomers arrive onstage.
+    const offstage = new Set((this.db.query("SELECT card_id FROM chat_cast WHERE chat_id = ? AND onstage = 0").all(chatId) as { card_id: string }[]).map((r) => r.card_id));
     this.db.transaction(() => {
       this.db.query("DELETE FROM chat_cast WHERE chat_id = ?").run(chatId);
-      const insert = this.db.query("INSERT INTO chat_cast (chat_id, card_id, position) VALUES (?, ?, ?)");
-      ids.forEach((cardId, i) => insert.run(chatId, cardId, i));
+      const insert = this.db.query("INSERT INTO chat_cast (chat_id, card_id, position, onstage) VALUES (?, ?, ?, ?)");
+      ids.forEach((cardId, i) => insert.run(chatId, cardId, i, offstage.has(cardId) ? 0 : 1));
     })();
   }
 
@@ -380,10 +399,13 @@ export class Store {
 
   /**
    * A chat's prompt blocks, in order, made up to date first: a new chat
-   * gets the main prompt, each cast card's fields in cast order, and the
-   * chat history; after that, a card added to the cast gets its fields
-   * just before the history, a new field on a card goes after that card's
-   * last block, and a card taken out of the cast loses its blocks.
+   * gets the main prompt, each cast card's fields in cast order, the
+   * chat's notes, and the chat history; after that, a card added to the
+   * cast gets its fields just before the history (and the notes, if they
+   * sit right above it), a new field on a card
+   * goes after that card's last block, and a card taken out of the cast
+   * loses its blocks. A chat from before notes gets them just before the
+   * history.
    */
   blocks(chatId: string): PromptBlock[] {
     const chat = this.chat(chatId);
@@ -396,7 +418,8 @@ export class Store {
          WHERE b.chat_id = ? ORDER BY b.position`,
       )
       .all(chatId) as Row[];
-    return rows.map((r) => toBlock(r, settings.mainPrompt));
+    const offstage = new Set(chat.offstage);
+    return rows.map((r) => toBlock(r, settings.mainPrompt, offstage));
   }
 
   block(id: string): PromptBlock {
@@ -413,6 +436,7 @@ export class Store {
       let position = 0;
       insert.run(newId(), chat.id, "main", null, null, position++);
       for (const cardId of chat.cast) for (const f of this.card(cardId).fields) insert.run(newId(), chat.id, "field", cardId, f.id, position++);
+      for (const title of CHAT_NOTES) this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, role, position) VALUES (?, ?, 'note', ?, 'system', ?)").run(newId(), chat.id, title, position++);
       this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, role, position) VALUES (?, ?, 'history', 'user', ?)").run(newId(), chat.id, position);
       return;
     }
@@ -423,12 +447,18 @@ export class Store {
     // The main prompt and the history always exist once.
     if (!blocks.some((b) => b.kind === "main")) blocks.unshift({ id: newId(), kind: "main", card_id: null, field_id: null, new: true });
     if (!blocks.some((b) => b.kind === "history")) blocks.push({ id: newId(), kind: "history", card_id: null, field_id: null, new: true });
+    // Its notes, once each (a chat from before notes gets them just before the history).
+    const notes = new Set((this.db.query("SELECT title FROM prompt_blocks WHERE chat_id = ? AND kind = 'note'").all(chat.id) as { title: string }[]).map((r) => r.title));
+    const missing = CHAT_NOTES.filter((t) => !notes.has(t));
+    if (missing.length) blocks.splice(blocks.findIndex((b) => b.kind === "history"), 0, ...missing.map((title) => ({ id: newId(), kind: "note", title, card_id: null, field_id: null, new: true })));
     // Fields with no block yet.
     for (const cardId of chat.cast) {
       for (const f of this.card(cardId).fields) {
         if (blocks.some((b) => b.field_id === f.id)) continue;
         const lastOfCard = blocks.map((b) => b.card_id).lastIndexOf(cardId);
-        const at = lastOfCard >= 0 ? lastOfCard + 1 : blocks.findIndex((b) => b.kind === "history");
+        // A card new to the cast goes just before the history, ahead of the chat's notes if they sit there.
+        let at = lastOfCard >= 0 ? lastOfCard + 1 : blocks.findIndex((b) => b.kind === "history");
+        if (lastOfCard < 0) while (at > 0 && blocks[at - 1]!.kind === "note") at--;
         blocks.splice(at, 0, { id: newId(), kind: "field", card_id: cardId, field_id: f.id, new: true });
       }
     }
@@ -436,6 +466,7 @@ export class Store {
     blocks.forEach((b, i) => {
       if (b.new) {
         if (b.kind === "history") this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, role, position) VALUES (?, ?, 'history', 'user', ?)").run(b.id as string, chat.id, i);
+        else if (b.kind === "note") this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, role, position) VALUES (?, ?, 'note', ?, 'system', ?)").run(b.id as string, chat.id, b.title as string, i);
         else insert.run(b.id as string, chat.id, b.kind as string, (b.card_id as string | null) ?? null, (b.field_id as string | null) ?? null, i);
       } else update.run(i, b.id as string);
     });
@@ -468,7 +499,7 @@ export class Store {
     this.db.transaction(() => {
       if (raw.content !== undefined) {
         if (typeof raw.content !== "string") throw new ValidationError("A block's text must be text.");
-        if (block.kind === "text") this.db.query("UPDATE prompt_blocks SET content = ? WHERE id = ?").run(raw.content, id);
+        if (block.kind === "text" || block.kind === "note") this.db.query("UPDATE prompt_blocks SET content = ? WHERE id = ?").run(raw.content, id);
         else if (block.kind === "field") {
           this.db.query("UPDATE card_fields SET content = ? WHERE id = ?").run(raw.content, block.fieldId);
           this.db.query("UPDATE cards SET updated_at = ? WHERE id = ?").run(now(), block.cardId);
@@ -476,7 +507,7 @@ export class Store {
         else throw new ValidationError("The chat history's text is the chat itself.");
       }
       if (raw.title !== undefined) {
-        if (block.kind !== "text") throw new ValidationError("Only your own blocks can be renamed here.");
+        if (block.kind !== "text") throw new ValidationError(block.kind === "note" ? "A chat note keeps its name." : "Only your own blocks can be renamed here.");
         if (typeof raw.title !== "string" || !raw.title.trim()) throw new ValidationError("A block needs a title.");
         this.db.query("UPDATE prompt_blocks SET title = ? WHERE id = ?").run(raw.title.trim().slice(0, 200), id);
       }
@@ -502,6 +533,7 @@ export class Store {
   /** Remove one of the chat's own text blocks. (Card fields leave with their card; the main prompt and history stay.) */
   deleteBlock(id: string): void {
     const block = this.block(id);
+    if (block.kind === "note") throw new ValidationError("Every chat keeps its notes. Empty this one instead (an empty note sends nothing), or switch it off.");
     if (block.kind !== "text") throw new ValidationError("Only your own blocks can be deleted. Switch this one off instead.");
     this.db.query("DELETE FROM prompt_blocks WHERE id = ?").run(id);
   }
@@ -646,10 +678,10 @@ function toMessage(r: Row): Message {
   };
 }
 
-function toBlock(r: Row, mainPrompt: string): PromptBlock {
+function toBlock(r: Row, mainPrompt: string, offstage: Set<string>): PromptBlock {
   const kind = r.kind as BlockKind;
   const title = kind === "main" ? "Main prompt" : kind === "history" ? "Chat history" : kind === "field" ? (r.field_title as string) : (r.title as string);
-  const content = kind === "main" ? mainPrompt : kind === "field" ? (r.field_content as string) : kind === "text" ? (r.content as string) : "";
+  const content = kind === "main" ? mainPrompt : kind === "field" ? (r.field_content as string) : kind === "text" || kind === "note" ? (r.content as string) : "";
   return {
     id: r.id as string,
     chatId: r.chat_id as string,
@@ -662,6 +694,7 @@ function toBlock(r: Row, mainPrompt: string): PromptBlock {
     enabled: r.enabled === 1,
     depth: (r.depth as number | null) ?? null,
     position: r.position as number,
+    offstage: kind === "field" && offstage.has(r.card_id as string),
   };
 }
 

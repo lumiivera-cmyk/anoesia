@@ -59,7 +59,8 @@ export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, cha
 - cards/<card>/<field>: a card's fields (Description, Advanced description, System prompt, and custom fields)
 - prompt/main: the main prompt, shared by every chat
 - chats/<chat>/messages/<n>: a chat's messages, 1 is the first; the version shown
-- chats/<chat>/blocks/<block>: the blocks on a chat's prompts page, in order
+- chats/<chat>/blocks/<block>: the blocks on a chat's prompts page, in order. Two are the chat's notes, sent to the roleplay model when they have text: "Right now" (where the story stands) and "Who knows what" (one line per secret). Story state goes there, never in a card: cards describe who someone is.
+- chats/<chat>/cast: who's onstage, one "Name: onstage" or "Name: offstage" line per cast member. Offstage, only the card's Description is sent and {{cast}} leaves them out. Edit a line to move someone on or off stage.
 - agent/index.md (your notes, below), agent/personality.md, agent/notes/, agent/chats/<chat>/ (a folder for each chat)`,
     index ? `## Your notes (agent/index.md)\n\n${index}` : "",
     notebook ? `## This chat's notebook (agent/chats/${open?.name}/notebook.md)\n\n${notebook}` : "",
