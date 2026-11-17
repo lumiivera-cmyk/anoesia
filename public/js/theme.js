@@ -2,9 +2,8 @@
  * The material and the photo behind the app.
  *
  * Two materials: lacquer (panes over the photo, plain CSS) and selenite
- * (crystal plates, painted at runtime by js/selenite/). For now selenite
- * covers Settings only: everywhere else stays lacquer until those pages get
- * their selenite pass. The root element carries `.theme-lacquer` or
+ * (crystal plates, painted at runtime by js/selenite/), on every page. The
+ * root element carries `.theme-lacquer` or
  * `.theme-selenite`, plus `.sel` while selenite plates are up. This file
  * also sets the variables the background settings decide: the lacquer
  * colour retinted towards the photo (`--lac`), the glass panes' colour and
@@ -23,8 +22,8 @@ export const FINISHES = {
   shunkei: { label: "shunkei", hint: "clear coat, most photo", opacity: 0.5, blur: 14 },
 };
 
-/** The pages that have their selenite design so far. */
-const SELENITE_PAGES = ["settings"];
+/** The pages that have their selenite design. */
+const SELENITE_PAGES = ["chat", "prompts", "cards", "settings"];
 
 const phone = () => matchMedia("(max-width: 899px)").matches;
 
@@ -92,17 +91,62 @@ export function applyBackground(bg) {
 let plates = [];
 let plateKey = "";
 
-/** The plates each selenite page stands on: [host selector, outline, options]. */
+/** The sidebar's controls the crystal may cut (the boards' conform elements). */
+const SIDE_CUTS = ".new-chat,.chat-row.raised,.appnav";
+
+/**
+ * The plates each selenite page stands on: [host selector, outline, options].
+ * Smoke: the base (0.28 wide, 0.3 phone), plus 0.14 where a plate is full of
+ * small text (cards, prompts, settings columns; the handoff), plus 0.2 for
+ * phone Settings' full page.
+ */
 function platesFor(view) {
-  if (view !== "settings") return [];
   const smoke = baseSmoke();
-  if (phone()) return [["#view-settings", "agentfull", { smoke: smoke + 0.2 }]];
-  return [
-    ["#side", "side", { smoke }],
-    ["#view-settings .page-head", "chead", { smoke }],
-    ["#settings-nav", "setnav", { smoke: smoke + 0.16, grow: { l: 20, t: 32, r: 22, b: 50 } }],
-    ["#settings-main", "setmain", { smoke: smoke + 0.16, grow: { l: 26, t: 24, r: 28, b: 54 } }],
-  ];
+  const text = smoke + 0.14;
+  if (phone()) {
+    if (view === "chat") {
+      return [
+        ["#view-chat .chat-head", "phead", { smoke }],
+        ["#view-chat .composer-wrap", "pcompose", { smoke, cut: "#composer" }],
+      ];
+    }
+    // every other page is one plate with its header inside it
+    return [[`#view-${view}`, "agentfull", { smoke: view === "settings" ? smoke + 0.2 : text }]];
+  }
+  const side = ["#side", "side", { smoke, cut: SIDE_CUTS }];
+  if (view === "chat") {
+    return [
+      side,
+      ["#view-chat .chat-head", "head", { smoke }],
+      ["#view-chat .composer-wrap", "compose", { smoke }],
+    ];
+  }
+  if (view === "prompts") {
+    return [
+      side,
+      ["#view-prompts .page-head", "chead", { smoke }],
+      ["#blocks-pane", "pblocks", { smoke: text, grow: { l: 20, t: 22, r: 36, b: 56 } }],
+      ["#preview-pane", "pprev", { smoke: text, grow: { l: 24, t: 20, r: 14, b: 42 } }],
+    ];
+  }
+  if (view === "cards") {
+    return [
+      side,
+      ["#view-cards .page-head", "chead", { smoke }],
+      ["#library", "lib", { smoke: text, grow: { l: 10, t: 12, r: 10, b: 48 }, cut: ".find" }],
+      ["#card-editor", "edit", { smoke: text, grow: { l: 16, t: 22, r: 26, b: 44 } }],
+      ["#card-rail", "rail", { smoke: text, grow: { l: 22, t: 16, r: 16, b: 44 } }],
+    ];
+  }
+  if (view === "settings") {
+    return [
+      side,
+      ["#view-settings .page-head", "chead", { smoke }],
+      ["#settings-nav", "setnav", { smoke: smoke + 0.16, grow: { l: 20, t: 32, r: 22, b: 50 } }],
+      ["#settings-main", "setmain", { smoke: smoke + 0.16, grow: { l: 26, t: 24, r: 28, b: 54 } }],
+    ];
+  }
+  return [];
 }
 
 /** The neon tubes: selenite's scene when there's no photo (from the selenite boards). */
@@ -145,8 +189,12 @@ export function applyMaterial() {
   plateKey = key;
   for (const p of plates) p.remove();
   plates = [];
+  for (const d of document.querySelectorAll("dialog[open]")) plateDialog(d);
   if (!on) return;
-  for (const [sel, name, opts] of platesFor(root.dataset.view)) {
+  const smoke = baseSmoke();
+  // the agent stands over the page on its own plate, frosted enough to read over the story
+  const agent = ["#agent-panel", phone() ? "agentfull" : "agent", { smoke: smoke + 0.14, blur: 9, inside: true }];
+  for (const [sel, name, opts] of [...platesFor(root.dataset.view), agent]) {
     const host = document.querySelector(sel);
     if (host) plates.push(addPlate(host, name, opts));
   }
@@ -158,12 +206,61 @@ matchMedia("(max-width: 899px)").addEventListener("change", () => {
   applyMaterial();
 });
 
-/** A dialog's own plate while it's open in selenite (the model list): removed when it closes. */
-export function dialogPlate(dialog, wide, narrow) {
-  if (!seleniteOn()) return;
-  const [name, { extra = 0, ...opts }] = phone() ? narrow : wide;
-  const p = addPlate(dialog, name, { ...opts, smoke: baseSmoke() + extra, inside: true });
-  dialog.addEventListener("close", () => p.remove(), { once: true });
+/**
+ * The overlays that stand on their own plate while they're open in selenite:
+ * dialog id -> [wide, phone], each [outline, { extra smoke, ...addPlate options }],
+ * a list of [selector inside the dialog, outline, options] for a dialog made
+ * of separate pieces, or null for none. Sheets on a phone add 0.3 smoke, like the boards' sheets;
+ * the small desktop menus stay frosted panels (see app.css).
+ */
+const SHEET = ["sheet", { extra: 0.3, blur: 10, grow: { l: 12, r: 12, b: 16 } }];
+const DIALOG_PLATES = {
+  drawer: [null, ["drawer", {}]],
+  "chat-menu": [null, ["menu", { extra: 0.3 }]],
+  // the lifted message and the menu under it (phone only)
+  "message-menu": [null, [["#lifted", "lift", { extra: 0.3 }], ["#message-menu-items", "menu", { extra: 0.3 }]]],
+  "role-menu": [null, SHEET],
+  "pick-menu": [null, SHEET],
+  "move-menu": [null, ["pmenu", { extra: 0.3 }]],
+  "colour-picker": [["cpick", { extra: 0.3, blur: 9 }], SHEET],
+  "confirm-dialog": [["dlg", { extra: 0.3, blur: 9 }], SHEET],
+  "chat-dialog": [["dlg", { extra: 0.3, blur: 9 }], SHEET],
+  "import-dialog": [["dlg", { extra: 0.3, blur: 9 }], SHEET],
+  "text-editor": [["edit", { extra: 0.3, blur: 9 }], ["agentfull", { extra: 0.2 }]],
+  "model-picker": [["smodel", { extra: 0.3, blur: 9 }], SHEET],
+};
+
+const dialogPlates = new Map(); // dialog -> plates
+
+function plateDialog(dialog) {
+  for (const p of dialogPlates.get(dialog) ?? []) p.remove();
+  dialogPlates.delete(dialog);
+  const spec = DIALOG_PLATES[dialog.id];
+  if (!dialog.open || !spec || !seleniteOn()) {
+    dialog.classList.remove("on-plate");
+    return;
+  }
+  const choice = phone() ? spec[1] : spec[0];
+  dialog.classList.toggle("on-plate", Boolean(choice));
+  if (!choice) return;
+  const parts = typeof choice[0] === "string" ? [[null, ...choice]] : choice;
+  const made = [];
+  for (const [sel, name, { extra = 0, ...opts }] of parts) {
+    const host = sel ? dialog.querySelector(sel) : dialog;
+    if (host) made.push(addPlate(host, name, { ...opts, smoke: baseSmoke() + extra, inside: true }));
+  }
+  dialogPlates.set(dialog, made);
+}
+
+/** Watch every overlay: a plate goes up when it opens in selenite, and comes down when it closes. */
+export function watchDialogs() {
+  const mo = new MutationObserver((records) => {
+    for (const r of records) plateDialog(r.target);
+  });
+  for (const id of Object.keys(DIALOG_PLATES)) {
+    const d = document.getElementById(id);
+    if (d) mo.observe(d, { attributes: true, attributeFilter: ["open"] });
+  }
 }
 
 /** The longest side an uploaded photo keeps: sharp on a big screen, small enough to load fast. */

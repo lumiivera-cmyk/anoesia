@@ -6,7 +6,7 @@
 import { $, attempt, go, loadState, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { openDrawer, renderSide, wireSide } from "./side.js";
-import { applyBackground, applyMaterial } from "./theme.js";
+import { applyBackground, applyMaterial, watchDialogs } from "./theme.js";
 import { openChat, showChatView, wireChat } from "./chat.js";
 import { showPrompts, wirePrompts } from "./prompts.js";
 import { showCards, wireCards } from "./cards.js";
@@ -58,6 +58,7 @@ async function start() {
   wireSettings();
   wireTextEditor();
   wireAgent();
+  watchDialogs();
   $("confirm-icon").innerHTML = icon.trash(16);
   for (const h of document.querySelectorAll("h1")) h.tabIndex = -1;
   try {

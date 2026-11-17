@@ -460,8 +460,10 @@ export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = 
   const fx = el.querySelector(".fx");
   const under = el.querySelector(".under");
   fx.style.background = `rgba(10,8,18,${Math.min(0.92, smoke)})`;
-  if (inside) host.prepend(el);
-  else layer().append(el);
+  if (inside) {
+    host.prepend(el);
+    host.classList.add("plate-host");
+  } else layer().append(el);
 
   let size = "";
   let removed = false;
@@ -584,6 +586,7 @@ export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = 
       for (const c of host.querySelectorAll(".cut")) c.classList.remove("cut");
       removeEventListener("resize", place);
       el.remove();
+      if (inside) host.classList.remove("plate-host");
       filterSvg?.querySelector(`#${id}`)?.remove();
     },
   };
