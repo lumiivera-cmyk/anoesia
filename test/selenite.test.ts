@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MARGIN, paintPlate } from "../public/js/selenite/paint.js";
-import { fitPlate, PLATES } from "../public/js/selenite/plates.js";
+import { clearOf, fitPlate, PLATES } from "../public/js/selenite/plates.js";
 
 describe("selenite plates", () => {
   test("an outline fitted to a new size keeps its corner cuts and notches", () => {
@@ -38,7 +38,7 @@ describe("selenite plates", () => {
     const cfg = fitPlate("smodel", 240, 160);
     const r = paintPlate(cfg, 1);
     expect([r.W, r.H]).toEqual([240, 160]);
-    for (const k of ["zone", "mask", "spec", "disp"] as const) expect(r[k].length).toBe(240 * 160 * 4);
+    for (const k of ["zone", "mask", "clear", "edge", "spec", "disp"] as const) expect(r[k].length).toBe(240 * 160 * 4);
     expect([r.under.W, r.under.H]).toEqual([240 + 2 * MARGIN, 160 + 2 * MARGIN]);
     const alpha = (img: Uint8ClampedArray, x: number, y: number) => img[(y * 240 + x) * 4 + 3];
     // inside the outline the mask is solid, outside (the cut bottom-left corner) it's clear
@@ -56,5 +56,31 @@ describe("selenite plates", () => {
     const a = paintPlate(cfg, 1);
     const b = paintPlate(cfg, 1);
     expect(Buffer.from(a.zone).equals(Buffer.from(b.zone))).toBe(true);
+  });
+
+  test("the clear zone sits the plate's inset inside its outline, with a thin edge along it", () => {
+    const cfg = fitPlate("smodel", 240, 160);
+    const r = paintPlate(cfg, 1);
+    const alpha = (img: Uint8ClampedArray, x: number, y: number) => img[(y * 240 + x) * 4 + 3];
+    // inset 12: clear well inside, not at 6 px from the top edge
+    expect(alpha(r.clear, 120, 80)).toBe(255);
+    expect(alpha(r.clear, 120, 6)).toBe(0);
+    // the edge band is 2 px wide, just inside the clear zone's boundary
+    expect(alpha(r.edge, 120, 13)).toBeGreaterThan(0);
+    expect(alpha(r.edge, 120, 30)).toBe(0);
+  });
+
+  test("a control crossing the clear zone is found, one inside it isn't", () => {
+    const cfg = fitPlate("side", 256, 876);
+    expect(clearOf(cfg, [40, 300, 200, 360])).toBe(true);
+    // the board's "new chat" button runs into the top-right corner cut
+    expect(clearOf(cfg, [12, 62, 244, 106])).toBe(false);
+  });
+
+  test("every board's plate is here, with its own seed", () => {
+    const names = ["side", "agent", "head", "compose", "pop", "chead", "lib", "edit", "rail", "dlg", "cpick", "pblocks", "pprev", "pmenu", "setnav", "setmain", "smodel", "phead", "pcompose", "drawer", "sheet", "pagent", "agentfull", "menu", "lift"];
+    expect(Object.keys(PLATES).sort()).toEqual([...names].sort());
+    const seeds = Object.values(PLATES).map((p) => p.seed);
+    expect(new Set(seeds).size).toBe(seeds.length);
   });
 });

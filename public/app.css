@@ -722,6 +722,8 @@ html[data-view="settings"] .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),.3))}
 .plate{position:absolute;pointer-events:none}
 .plate .gl{inset:0}
 .plate.pending .under,.plate.pending .light,.plate.pending .zone,.plate.pending .spec{display:none}
+.sel .cut{-webkit-mask:var(--cut-clear) var(--cut-pos)/var(--cut-size) no-repeat;mask:var(--cut-clear) var(--cut-pos)/var(--cut-size) no-repeat;-webkit-mask-clip:no-clip;mask-clip:no-clip}
+.sel .cut::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:rgba(255,255,255,.26);-webkit-mask:var(--cut-edge) var(--cut-pos)/var(--cut-size) no-repeat;mask:var(--cut-edge) var(--cut-pos)/var(--cut-size) no-repeat}
 .plate.pending .fx{-webkit-backdrop-filter:blur(12px) saturate(1.1) brightness(1.05);backdrop-filter:blur(12px) saturate(1.1) brightness(1.05)}
 html.sel .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),var(--dim-floor,.3)))}
 .bg .tubes{position:absolute;inset:0;width:100%;height:100%;display:none}

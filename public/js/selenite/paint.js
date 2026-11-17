@@ -255,7 +255,7 @@ function perimeter(poly) {
 /**
  * Paint one plate.
  * cfg: { w, h, poly, inset, fibre, feathers, content?: [[x0,y0,x1,y1]], seed }
- * Returns RGBA arrays: { W, H, zone, mask, spec, disp, under: {W, H, data}, maxd, twinkles }.
+ * Returns RGBA arrays: { W, H, zone, mask, clear, edge, spec, disp, under: {W, H, data}, maxd, twinkles }.
  */
 export function paintPlate(cfg, ss = 1) {
   const { w, h, poly } = cfg;
@@ -724,5 +724,19 @@ export function paintPlate(cfg, ss = 1) {
     under[o + 3] = a * 255;
   }
 
-  return { W, H, zone, mask: maskImg, spec, disp, under: { W: UW, H: UH, data: under }, maxd: Math.round(md * 100) / 100, twinkles };
+  // ---------- clear zone: where controls may sit, and the 2 px band along its edge ----------
+  // A control the crystal cuts (a "conform" element on the boards) is masked to `clear` and
+  // gets a faint ring from `edge` where the cut runs.
+  const clear = new Uint8ClampedArray(N * 4);
+  const edge = new Uint8ClampedArray(N * 4);
+  for (let i = 0; i < N; i++) {
+    const a = clamp01((sd[i] - cfg.inset) * ss + 0.5);
+    const b = clamp01((sd[i] - cfg.inset - 2) * ss + 0.5);
+    const o = i * 4;
+    clear[o] = clear[o + 1] = clear[o + 2] = edge[o] = edge[o + 1] = edge[o + 2] = 255;
+    clear[o + 3] = a * 255;
+    edge[o + 3] = a * (1 - b) * 255;
+  }
+
+  return { W, H, zone, mask: maskImg, clear, edge, spec, disp, under: { W: UW, H: UH, data: under }, maxd: Math.round(md * 100) / 100, twinkles };
 }
