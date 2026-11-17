@@ -9,7 +9,17 @@ const fake = Bun.serve({
   port: 0,
   async fetch(req) {
     const u = new URL(req.url);
-    if (u.pathname.endsWith("/models")) return Response.json({ data: [{ id: "test/model", name: "Test model", context_length: 32768 }] });
+    if (u.pathname.endsWith("/models"))
+      return Response.json({
+        data: [
+          { id: "test/model", name: "Test model", context_length: 32768 },
+          { id: "test/long-context", context_length: 1000000 },
+          { id: "test/thinker", context_length: 131072, capabilities: { reasoning: true } },
+          ...Array.from({ length: 30 }, (_, i) => ({ id: `vendor-${i % 5}/model-${i}`, context_length: 8192 * (1 + (i % 8)) })),
+        ],
+      });
+    // A key saved as "bad" is refused, like a revoked one (for the "connection failing" screens).
+    if (req.headers.get("authorization") === "Bearer bad") return Response.json({ error: { message: "Invalid API key" } }, { status: 401 });
     const body: any = await req.json();
     await Bun.sleep(Number(process.env.DELAY ?? 300));
     return Response.json({ model: body.model, choices: [{ message: { content: "Ada glances up from the setlist. *She sets the pen down.*\n\n\"You're early,\" she says. \"Again.\"" }, finish_reason: "stop" }] });

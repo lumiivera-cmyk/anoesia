@@ -1,13 +1,13 @@
 /**
  * The sidebar on a wide screen, and the same things in a drawer on a phone:
- * new chat, the chat list, and links to Cards, Prompts and Settings.
+ * new chat, the chat list, and links to Cards, Prompts and Settings (a page
+ * of its own, #/settings).
  */
 
 import { $, cardById, dayLabel, escapeHtml, shortName, state } from "./core.js";
 import { icon } from "./icons.js";
 import { closeOverlay, openOverlay } from "./overlay.js";
 import { newChat } from "./chat.js";
-import { openSettings } from "./settings.js";
 
 /** The sidebar (wide) and the drawer (phone) hold the same things. */
 export function renderSide() {
@@ -38,7 +38,7 @@ export function renderSide() {
     <nav class="sunk appnav" aria-label="App">
       ${nav("cards", "Cards", state.chatId && page === "cards" ? "#/cards" : "#/cards", icon.cards())}
       ${nav("prompts", "Prompts", "#/prompts", icon.prompts())}
-      <button type="button" class="ghost press appnav-item" data-open-settings>${icon.settings()}<span>Settings</span></button>
+      ${nav("settings", "Settings", "#/settings", icon.settings())}
     </nav>`;
   $("side").innerHTML = html;
   $("drawer").innerHTML = `<div class="drawer-in">${html}</div>`;
@@ -50,9 +50,6 @@ export function wireSide(root) {
     if (e.target.closest("[data-new-chat]")) {
       closeOverlay($("drawer"));
       newChat();
-    } else if (e.target.closest("[data-open-settings]")) {
-      closeOverlay($("drawer"));
-      openSettings(e.target.closest("button"));
     } else if (e.target.closest("[data-close-drawer]")) closeOverlay($("drawer"));
     else if (e.target.closest("a")) {
       if (e.target.closest('a[aria-disabled="true"]')) e.preventDefault();

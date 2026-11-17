@@ -23,12 +23,38 @@ const card = (n) => async (p) => nav(p, "#/cards/" + (await cardId(p, n)));
 const then = (a, ...fs) => async (p) => { await a(p); for (const f of fs) await f(p); };
 const tap = (sel) => (p) => click(p, sel);
 const prompts = async (p) => { await chat("Backstage")(p); await nav(p, "#/prompts"); };
+// Settings: a page of its own. Some screens need the server put in a state first.
+const send = (method, path, body) => async (p) => { await home(p); await p.evaluate(async ([m, u, b]) => { await fetch(u, { method: m, headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }); }, [method, "http://127.0.0.1:4950" + path, body]); await p.reload(); await p.waitForTimeout(300); };
+const settings = (h = "") => then(chat("Backstage"), async (p) => nav(p, "#/settings" + h));
+const failingKey = then(send("PUT", "/api/providers/nanogpt", { key: "bad" }), send("POST", "/api/providers/nanogpt/test", {}));
+const editor = then(settings("/connections"), tap(".prof"));
+const SETTINGS = (phone) => [
+  [phone ? "settings sections" : "settings", settings()],
+  ["settings connections", settings("/connections")],
+  ["settings failing", then(failingKey, settings("/connections"))],
+  ["settings fix the key", then(failingKey, settings("/connections"), tap("[data-fix]"))],
+  ["settings vertex setup", then(settings("/connections"), tap('[data-setup="vertex"]'))],
+  ["settings region menu", then(settings("/connections"), tap('[data-setup="vertex"]'), tap("#vreg-b"))],
+  ["settings story menu", then(settings("/connections"), tap('[data-assign="story"]'))],
+  ["settings profile", editor],
+  ["settings profile more", then(editor, tap("[data-more]"))],
+  ["settings new profile", then(settings("/connections"), tap("[data-new-profile]"))],
+  ["settings picking a model", then(editor, tap("#model-b"))],
+  ["settings look", settings("/look")],
+  ["settings look below readable", then(send("PATCH", "/api/settings", { background: { dim: 0.1, window: 0.4 } }), settings("/look"))],
+  ["settings agent", settings("/agent")],
+  ["settings typing", settings("/typing")],
+];
+// The same Settings screens in selenite (your material set to selenite first).
+const SELENITE = (phone) => SETTINGS(phone).map(([n, f]) => [n.replace("settings", "selenite settings"), then(send("PATCH", "/api/settings", { background: { material: "selenite" } }), f)]);
 const SCREENS = {
   desk: [
     ["chat", chat("Backstage")],
     ["chat empty", chat("Night market")],
     ["chat settings", then(chat("Backstage"), tap("#open-chat-settings"))],
-    ["settings", then(chat("Backstage"), tap("#side [data-open-settings]"))],
+    ["settings from the sidebar", then(chat("Backstage"), tap('#side a[href="#/settings"]'))],
+    ...SETTINGS(false),
+    ...SELENITE(false),
     ["prompts", prompts],
     ["prompts sent", then(prompts, tap("#pv-sent"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -46,7 +72,9 @@ const SCREENS = {
     ["chat menu", then(chat("Backstage"), tap("#open-chat-menu"))],
     ["message menu", then(chat("Backstage"), tap("#messages .msg:last-of-type .msg-body"))],
     ["chat settings", then(chat("Backstage"), tap("#phone-title"))],
-    ["settings", then(chat("Backstage"), tap("#open-drawer"), tap("#drawer [data-open-settings]"))],
+    ["settings from the drawer", then(chat("Backstage"), tap("#open-drawer"), tap('#drawer a[href="#/settings"]'))],
+    ...SETTINGS(true),
+    ...SELENITE(true),
     ["prompts", prompts],
     ["prompts preview", then(prompts, tap("#tab-preview"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -76,6 +104,10 @@ const TEXTS = `() => { const out = [];
     const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
     const rg = document.createRange(); rg.selectNodeContents(own[0]); const r = rg.getBoundingClientRect();
     if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
+    // text scrolled out of its scroll area isn't on screen, whatever its box says
+    let hiddenByScroll = false;
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const ac = getComputedStyle(a); if (ac.overflowX === "visible" && ac.overflowY === "visible") continue; const ar = a.getBoundingClientRect(); if (r.bottom <= ar.top + 1 || r.top >= ar.bottom - 1 || r.right <= ar.left + 1 || r.left >= ar.right - 1) { hiddenByScroll = true; break; } }
+    if (hiddenByScroll) continue;
     const m = cs.color.match(/[\\d.]+/g).map(Number);
     out.push({ t: own.map((n) => n.textContent).join(' ').trim().replace(/\\s+/g, ' ').slice(0, 40), x: r.left, y: r.top, w: r.width, h: r.height, c: m.slice(0, 3), a: (m.length > 3 ? m[3] : 1) * effOp(el), fs: parseFloat(cs.fontSize), fw: +cs.fontWeight, tag: el.tagName.toLowerCase(), disabled: !!el.closest(':disabled,[aria-disabled="true"]') });
   } return out; }`;
@@ -95,6 +127,8 @@ const TEXTS = `() => { const out = [];
     p.on("console", (m) => m.type() === "error" && errs.push("console: " + m.text().slice(0, 200)));
     let setupErr = null;
     try { await setup(p); } catch (e) { setupErr = String(e).split("\n")[0]; }
+    // selenite plates paint in a worker: measure once they're up (the click test doesn't need them)
+    await p.waitForFunction(() => !document.querySelector(".plate.pending"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
     const r = { errors: [...errs], setupErr };
     await p.addScriptTag({ path: AXE });
     r.axe = await p.evaluate(async () => { const top = [...document.querySelectorAll("dialog[open]")].pop();

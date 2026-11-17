@@ -257,7 +257,7 @@ describe("agent turns through the server", () => {
     const { session } = await setUp();
     const r = await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "hi" });
     expect(r.status).toBe(400);
-    expect(r.data.error).toContain("Settings → Agent");
+    expect(r.data.error).toContain("Settings → Connections");
   });
 
   test("runs tools, logs the edit with a diff, and reverts it", async () => {

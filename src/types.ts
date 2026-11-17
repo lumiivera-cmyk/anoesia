@@ -110,6 +110,8 @@ export interface Settings {
   background: Background;
   /** The profile the agent thinks with (empty until one is picked). */
   agentProfileId: string;
+  /** On a computer, Enter sends and Shift+Enter adds a line (true), or Enter adds a line and Ctrl+Enter sends (false). Phones always add a line. */
+  enterSends: boolean;
 }
 
 /** A background photo you uploaded. The file is in the data folder, served at `url`. */
@@ -128,8 +130,12 @@ export interface Photo {
 /** Lacquer finishes: opaque, 72% with a blur, or 50% with a lighter blur. */
 export type Finish = "roiro" | "tamenuri" | "shunkei";
 
+/** The app's material: lacquer panes, or selenite crystal plates. */
+export type Material = "lacquer" | "selenite";
+
 export interface Background {
-  /** An uploaded photo's id, or "none". */
+  material: Material;
+  /** An uploaded photo's id, or "none" (selenite shows its neon tubes then). */
   photo: string;
   finish: Finish;
   /** How far the photo's hue tints the lacquer, 0 to 1. */

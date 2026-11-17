@@ -44,6 +44,8 @@ beforeEach(() => {
   fake = Bun.serve({
     port: 0,
     async fetch(request) {
+      // A key saved as "bad" is refused, like a revoked one.
+      if (request.headers.get("authorization") === "Bearer bad") return Response.json({ error: { message: "Invalid API key" } }, { status: 401 });
       const body = (await request.json()) as (typeof received)[number];
       received.push(body);
       return Response.json({ model: body.model, choices: [{ message: { content: reply }, finish_reason: "stop" }] });
@@ -287,9 +289,11 @@ describe("cards", () => {
 describe("settings", () => {
   test("background settings are checked and kept", async () => {
     const start = (await call("GET", "/api/state")).data.settings.background;
-    expect(start).toEqual({ photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
+    expect(start).toEqual({ material: "lacquer", photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
     const changed = (await call("PATCH", "/api/settings", { background: { finish: "roiro", dim: 0.1, window: 0.5 } })).data.background;
-    expect(changed).toEqual({ photo: "none", finish: "roiro", tint: 0.6, dim: 0.1, window: 0.5 });
+    expect(changed).toEqual({ material: "lacquer", photo: "none", finish: "roiro", tint: 0.6, dim: 0.1, window: 0.5 });
+    expect((await call("PATCH", "/api/settings", { background: { material: "selenite" } })).data.background.material).toBe("selenite");
+    expect((await call("PATCH", "/api/settings", { background: { material: "glass" } })).status).toBe(400);
     expect((await call("PATCH", "/api/settings", { background: { dim: 0.9 } })).status).toBe(400);
     expect((await call("PATCH", "/api/settings", { background: { photo: "moon" } })).status).toBe(404);
     expect((await call("PATCH", "/api/settings", { background: { window: null } })).data.background.window).toBeNull();
@@ -309,6 +313,63 @@ describe("settings", () => {
     // Deleting the photo on show puts the background back to none, and the file goes.
     expect((await call("DELETE", `/api/photos/${added.id}`)).data.settings.background.photo).toBe("none");
     expect((await app.fetch(new Request(`http://127.0.0.1/${added.url}`))).status).toBe(404);
+  });
+
+  test("the Enter key setting is kept", async () => {
+    expect((await call("GET", "/api/state")).data.settings.enterSends).toBe(true);
+    expect((await call("PATCH", "/api/settings", { enterSends: false })).data.enterSends).toBe(false);
+    expect((await call("PATCH", "/api/settings", { enterSends: "yes" })).status).toBe(400);
+  });
+});
+
+describe("connections", () => {
+  test("a nanoGPT key saved in settings wins over .env, is kept, and is never sent back", async () => {
+    let providers = (await call("GET", "/api/state")).data.providers;
+    expect(providers.nanogpt).toMatchObject({ set: true, source: "env", last4: "-key", health: null });
+    const saved = (await call("PUT", "/api/providers/nanogpt", { key: "  sk-new-secret-1234 " })).data;
+    expect(saved.nanogpt).toMatchObject({ set: true, source: "app", last4: "1234" });
+    expect(JSON.stringify(saved)).not.toContain("secret");
+    expect((await call("PUT", "/api/providers/nanogpt", { key: "has spaces in it" })).status).toBe(400);
+    // It's what requests use now, and it outlives a restart.
+    app.close();
+    start();
+    providers = (await call("GET", "/api/providers")).data;
+    expect(providers.nanogpt).toMatchObject({ source: "app", last4: "1234" });
+    expect(readFileSync(join(dir, "providers.json"), "utf8")).toContain("sk-new-secret-1234");
+    // Forgetting it goes back to .env's.
+    expect((await call("DELETE", "/api/providers/nanogpt")).data.nanogpt).toMatchObject({ source: "env", last4: "-key" });
+  });
+
+  test("a rejected key shows as failing on the provider, until a reply gets through", async () => {
+    await setUp();
+    await call("PUT", "/api/providers/nanogpt", { key: "bad" });
+    const test1 = (await call("POST", "/api/providers/nanogpt/test", {})).data;
+    expect(test1).toMatchObject({ ok: false });
+    expect(test1.providers.nanogpt.health).toMatchObject({ ok: false, status: 401, failures: 1 });
+    const test2 = (await call("POST", "/api/providers/nanogpt/test", {})).data;
+    expect(test2.providers.nanogpt.health.failures).toBe(2);
+    await call("PUT", "/api/providers/nanogpt", { key: "good-key" });
+    const profile = (await call("GET", "/api/state")).data.profiles[0];
+    const ok = (await call("POST", `/api/profiles/${profile.id}/test`, {})).data;
+    expect(ok).toMatchObject({ ok: true });
+    expect(ok.providers.nanogpt.health).toMatchObject({ ok: true, failures: 0 });
+  });
+
+  test("testing needs a model, and a provider test needs a profile on it", async () => {
+    const empty = (await call("POST", "/api/profiles", { name: "Empty" })).data;
+    expect((await call("POST", `/api/profiles/${empty.id}/test`, {})).status).toBe(400);
+    expect((await call("POST", "/api/providers/nanogpt/test", {})).status).toBe(400);
+    expect((await call("POST", "/api/providers/claude/test", {})).status).toBe(404);
+  });
+
+  test("Vertex AI is set up from settings: project, region and a checked key file", async () => {
+    expect((await call("PUT", "/api/providers/vertex", { project: "Not A Project!" })).status).toBe(400);
+    expect((await call("PUT", "/api/providers/vertex", { location: "the-moon" })).status).toBe(400);
+    expect((await call("PUT", "/api/providers/vertex", { keyJson: '{"hello": 1}' })).status).toBe(400);
+    const key = JSON.stringify({ type: "service_account", client_email: "rp@my-project-123.iam.gserviceaccount.com", private_key: "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n" });
+    const v = (await call("PUT", "/api/providers/vertex", { project: "my-project-123", location: "us-central1", keyJson: key, keyName: "rp-key.json" })).data.vertex;
+    expect(v).toMatchObject({ set: true, source: "app", project: "my-project-123", location: "us-central1", keyName: "rp-key.json", account: "rp@my-project-123.iam.gserviceaccount.com" });
+    expect(JSON.stringify(v)).not.toContain("PRIVATE");
   });
 });
 

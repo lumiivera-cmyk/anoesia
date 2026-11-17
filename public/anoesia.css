@@ -238,6 +238,49 @@ textarea::placeholder,input::placeholder{color:var(--ink-5)}
 @media (pointer:coarse){.hue{height:var(--hit)}}
 .hexin{width:120px;padding:0 10px;font-variant-numeric:tabular-nums;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 
+/* slider: a range input. Set --fill to the value as a percentage so the track fills up to the thumb.
+   .slidewrap + .deftick marks a default on the track (the readable defaults on dim and window). */
+.slider{-webkit-appearance:none;appearance:none;display:block;width:100%;height:28px;margin:0;padding:0;background:transparent;cursor:pointer;--fill:50%}
+.slider::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--blue) var(--fill),var(--sunk-bg) var(--fill));box-shadow:inset 0 1px 2px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06)}
+.slider::-moz-range-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--blue) var(--fill),var(--sunk-bg) var(--fill))}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border:0;border-radius:50%;background:#F4FBFF;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 2px 5px rgba(0,0,0,.6),0 0 10px rgba(77,184,255,.45)}
+.slider::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:50%;background:#F4FBFF;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 2px 5px rgba(0,0,0,.6)}
+.slider:focus-visible{outline:none}
+.slider:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 0 4px var(--focus)}
+.slider:focus-visible::-moz-range-thumb{box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 0 4px var(--focus)}
+@media (pointer:coarse){.slider{height:var(--hit)}}
+.slidewrap{position:relative}
+.slidewrap .deftick{position:absolute;top:50%;width:2px;height:14px;margin:-7px 0 0 -1px;border-radius:1px;background:var(--ink-3);pointer-events:none}
+.slidends{display:flex;justify-content:space-between;font-size:var(--fs-xs);line-height:16px;color:var(--ink-4)}
+
+/* select: a button that shows the current choice and opens a .menu. Put it in a .sunk well. */
+.select{display:flex;align-items:center;gap:10px;width:100%;min-height:var(--hit);box-sizing:border-box;padding:6px 12px 6px 14px;border:0;border-radius:12px;font-size:var(--fs-md);font-weight:700;text-align:left;color:var(--ink-1)}
+.select .sub{display:block;font-size:var(--fs-xs);line-height:16px;font-weight:400;color:var(--ink-4)}
+.select .caret{margin-left:auto;flex:none;color:var(--ink-4)}
+
+/* number field: a number with its unit, in a .sunk well. Make the well a <label> so a tap anywhere in it focuses the number. */
+.numfield{display:inline-flex;align-items:center;gap:6px;height:var(--hit);box-sizing:border-box;padding:0 14px;border-radius:12px}
+.numfield input{width:76px;align-self:stretch;border:0;padding:0;background:transparent;text-align:right;font:inherit;font-size:var(--fs-md);font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink-1)}
+.numfield input:focus-visible{outline:none}
+.numfield:focus-within{outline:3px solid var(--focus);outline-offset:3px}
+.numfield .unit{font-size:var(--fs-sm);color:var(--ink-4)}
+
+/* status dot: always beside words that say the same thing. Blue = working, ring = not set up, pink = failing. */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-ok{background:var(--blue);box-shadow:0 0 8px rgba(77,184,255,.75)}
+.dot-off{box-shadow:inset 0 0 0 1.5px var(--ink-4)}
+.dot-bad{background:var(--danger-ink);box-shadow:0 0 8px rgba(255,90,140,.6)}
+
+/* settings rows: a label and its hint on the left, the control on the right. Groups open with an .eyebrow. */
+.setgroup{display:flex;flex-direction:column}
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 18px;padding:14px 0;border-top:1px solid rgba(255,255,255,.07)}
+.setrow:first-of-type{border-top:0}
+.setrow .lbl{font-size:var(--fs-md);line-height:21px;font-weight:700;color:var(--ink-1)}
+.setrow .hint{grid-column:1;font-size:var(--fs-xs);line-height:17px;color:var(--ink-4)}
+.setrow .ctl{grid-column:2;grid-row:1 / span 2;display:flex;align-items:center;gap:10px}
+.setrow.wide{grid-template-columns:minmax(0,1fr)}
+.setrow.wide .ctl{grid-column:1;grid-row:auto}
+
 /* 7 · CHAT --------------------------------------------------------------------------- */
 .mhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .dia{width:5px;height:5px;transform:rotate(45deg);background:var(--ink-5)}

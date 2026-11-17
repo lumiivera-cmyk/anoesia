@@ -16,6 +16,8 @@ import {
   isTouch,
   loadState,
   personaOf,
+  enterHint,
+  sendsOnEnter,
   shortModel,
   shortName,
   showError,
@@ -65,6 +67,7 @@ function applyView(view, draw = true) {
 
 /** Show the chat page (called by the router). */
 export function showChatView() {
+  $("enter-hint").textContent = enterHint();
   renderChat(true);
 }
 
@@ -448,8 +451,8 @@ export function wireChat() {
   });
   $("composer-input").addEventListener("input", autosize);
   $("composer-input").addEventListener("keydown", (e) => {
-    // Enter sends on a computer; on a phone it's a new line and only Send sends.
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !isTouch()) {
+    // Enter sends on a computer (Settings → Typing can make it Ctrl+Enter); on a phone it's a new line and only Send sends.
+    if (sendsOnEnter(e)) {
       e.preventDefault();
       send();
     }

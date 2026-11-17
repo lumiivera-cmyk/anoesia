@@ -30,6 +30,20 @@ export const $ = (id) => document.getElementById(id);
 export const isPhone = () => matchMedia("(max-width: 899px)").matches;
 export const isTouch = () => matchMedia("(pointer: coarse)").matches;
 
+/**
+ * Whether a keydown in a composer should send: on a computer, Enter (or
+ * Ctrl+Enter when Settings → Typing says Enter adds a line). Never on a
+ * phone, where only Send sends.
+ */
+export function sendsOnEnter(e) {
+  if (e.key !== "Enter" || e.isComposing || isTouch()) return false;
+  if (state.settings?.enterSends === false) return e.ctrlKey || e.metaKey;
+  return !e.shiftKey;
+}
+
+/** The hint under the composer, matching sendsOnEnter. */
+export const enterHint = () => (state.settings?.enterSends === false ? "ctrl+enter sends · enter for a new line" : "enter sends · shift+enter for a new line");
+
 /** Call the server's JSON API. Throws an Error with the server's message. */
 export async function api(method, path, body) {
   // Relative, so the app works under a path (yourdomain/rp) as well as at the root.

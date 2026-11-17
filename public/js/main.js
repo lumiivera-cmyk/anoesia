@@ -1,23 +1,23 @@
 /**
  * Where the app starts: load everything, draw the sidebar, and follow the
- * hash route to the chat, the prompts page or the cards page.
+ * hash route to the chat, the prompts page, the cards page or settings.
  */
 
 import { $, attempt, go, loadState, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { openDrawer, renderSide, wireSide } from "./side.js";
-import { applyBackground } from "./theme.js";
+import { applyBackground, applyMaterial } from "./theme.js";
 import { openChat, showChatView, wireChat } from "./chat.js";
 import { showPrompts, wirePrompts } from "./prompts.js";
 import { showCards, wireCards } from "./cards.js";
-import { wireSettings } from "./settings.js";
+import { showSettings, wireSettings } from "./settings.js";
 import { wireTextEditor } from "./editor.js";
 import { wireAgent } from "./agent.js";
 
 // ------------------------------------------------------------------ router
 
 async function route() {
-  const [, page = "chat", id = ""] = location.hash.split("/");
+  const [, page = "chat", id = "", sub = ""] = location.hash.split("/");
   if (page === "chat" || page === "") {
     if (id && id !== state.chatId) await openChat(id);
     showView("chat");
@@ -29,13 +29,17 @@ async function route() {
   } else if (page === "cards") {
     showView("cards");
     showCards(id || null);
+  } else if (page === "settings") {
+    showView("settings");
+    await showSettings(id, sub);
   } else go("#/");
   renderSide();
 }
 
 function showView(name) {
-  for (const v of ["chat", "prompts", "cards"]) $(`view-${v}`).hidden = v !== name;
+  for (const v of ["chat", "prompts", "cards", "settings"]) $(`view-${v}`).hidden = v !== name;
   document.documentElement.dataset.view = name;
+  applyMaterial();
   if (name !== "chat") $(`view-${name}`).querySelector("h1")?.focus({ preventScroll: true });
 }
 
