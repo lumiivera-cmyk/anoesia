@@ -15,6 +15,8 @@ export interface Painted {
   H: number;
   zone: Uint8ClampedArray;
   mask: Uint8ClampedArray;
+  clear: Uint8ClampedArray;
+  edge: Uint8ClampedArray;
   spec: Uint8ClampedArray;
   disp: Uint8ClampedArray;
   under: { W: number; H: number; data: Uint8ClampedArray };

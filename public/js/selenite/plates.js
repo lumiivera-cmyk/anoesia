@@ -18,21 +18,105 @@
 
 import { MARGIN } from "./paint.js";
 
-/** Outlines, in the size they were drawn at (plate pixels). Sources in the comments. */
+/**
+ * Outlines, in the size they were drawn at (plate pixels), copied from the
+ * handoff's layout files (sources in the comments). `content` is where the
+ * board puts its controls: the crystal calms down behind it. The phone
+ * boards' header, composer and agent are `phead`, `pcompose` and `pagent`.
+ * Seeds are fixed so a plate paints the same every time.
+ */
 export const PLATES = {
-  // selenite_layout.py: the chat board's sidebar
+  // selenite_layout.py: the chat board
   side: {
     w: 256, h: 876, inset: 12, fibre: 88, seed: 311,
     poly: [[0, 40], [18, 0], [186, 0], [186, 8], [224, 8], [256, 84], [256, 188], [242, 188], [242, 556], [252, 596], [252, 764], [226, 876], [46, 870], [46, 860], [8, 860], [8, 612], [0, 604]],
     feathers: [[70, 640, 60], [180, 470, 34]],
     content: [[12, 20, 244, 846]],
+    // conform on the board: newchat, row1, tray
   },
-  // cards_selenite_layout.py: the page header, shared by cards, prompts and settings
+  agent: {
+    w: 378, h: 876, inset: 12, fibre: 93, seed: 514,
+    poly: [[0, 58], [24, 0], [300, 0], [300, 8], [350, 8], [378, 52], [378, 540], [360, 540], [360, 660], [374, 706], [374, 820], [334, 876], [70, 870], [0, 806], [0, 530], [10, 530], [10, 300], [0, 300]],
+    feathers: [[150, 700, 70]],
+    content: [[12, 20, 366, 862]],
+    // conform on the board: a-ask, a-comp
+  },
+  head: {
+    w: 728, h: 72, inset: 10, fibre: 3, seed: 543,
+    poly: [[0, 14], [14, 0], [508, 0], [516, 6], [714, 6], [728, 20], [728, 58], [712, 72], [152, 72], [146, 66], [0, 66]],
+    feathers: [],
+    content: [[20, 16, 704, 60]],
+  },
+  compose: {
+    w: 728, h: 120, inset: 10, fibre: -2, seed: 572,
+    poly: [[0, 16], [20, 0], [436, 0], [436, 6], [704, 6], [728, 28], [728, 120], [40, 120], [0, 106]],
+    feathers: [[480, 92, 26]],
+    content: [[12, 18, 710, 110]],
+    // conform on the board: c-nudges
+  },
+  pop: {
+    w: 360, h: 280, inset: 10, fibre: 84, seed: 601,
+    poly: [[0, 0], [284, 0], [284, 8], [328, 8], [360, 50], [360, 280], [28, 280], [0, 250]],
+    feathers: [],
+    content: [[10, 14, 350, 266]],
+    // conform on the board: p-row1, p-new
+  },
+  // cards_selenite_layout.py: the cards page (chead is also the prompts and settings header)
   chead: {
     w: 1132, h: 72, inset: 10, fibre: 3, seed: 340,
     poly: [[0, 14], [14, 0], [640, 0], [646, 6], [1112, 6], [1132, 26], [1132, 58], [1116, 72], [330, 72], [324, 66], [0, 66]],
     feathers: [],
-    content: [[22, 14, 480, 56]],
+    content: [[22, 14, 1104, 60]],
+  },
+  lib: {
+    w: 294, h: 784, inset: 12, fibre: 89, seed: 630,
+    poly: [[0, 28], [24, 0], [232, 0], [232, 6], [268, 6], [294, 40], [294, 380], [286, 380], [286, 590], [294, 612], [294, 760], [270, 784], [36, 784], [0, 752]],
+    feathers: [[150, 720, 46]],
+    content: [[10, 12, 284, 736]],
+    // conform on the board: l-find
+  },
+  edit: {
+    w: 532, h: 784, inset: 12, fibre: 92, seed: 659,
+    poly: [[0, 20], [20, 0], [330, 0], [336, 6], [508, 6], [532, 30], [532, 690], [522, 690], [522, 752], [494, 784], [44, 784], [0, 746]],
+    feathers: [[300, 744, 40]],
+    content: [[16, 22, 506, 740]],
+  },
+  rail: {
+    w: 266, h: 784, inset: 12, fibre: 87, seed: 688,
+    poly: [[0, 0], [226, 0], [266, 40], [266, 784], [30, 784], [0, 754], [0, 470], [8, 470], [8, 250], [0, 250]],
+    feathers: [[150, 700, 40]],
+    content: [[22, 16, 250, 740]],
+  },
+  dlg: {
+    w: 440, h: 250, inset: 12, fibre: 4, seed: 717,
+    poly: [[0, 0], [372, 0], [372, 8], [414, 8], [440, 36], [440, 250], [30, 250], [0, 222]],
+    feathers: [],
+    content: [[26, 24, 418, 226]],
+  },
+  cpick: {
+    w: 352, h: 392, inset: 12, fibre: 86, seed: 746,
+    poly: [[0, 0], [290, 0], [296, 6], [324, 6], [352, 34], [352, 392], [28, 392], [0, 364]],
+    feathers: [],
+    content: [[26, 24, 322, 366]],
+  },
+  // prompts_selenite_layout.py: the prompts page, and the phone move menu
+  pblocks: {
+    w: 660, h: 784, inset: 12, fibre: 90, seed: 775,
+    poly: [[0, 24], [24, 0], [420, 0], [426, 6], [630, 6], [660, 36], [660, 520], [650, 520], [650, 700], [660, 716], [660, 756], [632, 784], [40, 784], [0, 744]],
+    feathers: [[330, 744, 44]],
+    content: [[20, 22, 624, 728]],
+  },
+  pprev: {
+    w: 452, h: 784, inset: 12, fibre: 88, seed: 804,
+    poly: [[0, 30], [30, 0], [300, 0], [306, 6], [420, 6], [452, 38], [452, 760], [428, 784], [0, 784], [0, 560], [10, 560], [10, 330], [0, 330]],
+    feathers: [[220, 740, 40]],
+    content: [[24, 20, 438, 742]],
+  },
+  pmenu: {
+    w: 300, h: 336, inset: 10, fibre: 86, seed: 833,
+    poly: [[0, 0], [250, 0], [256, 6], [272, 6], [300, 34], [300, 336], [26, 336], [0, 314]],
+    feathers: [],
+    content: [[10, 16, 290, 312]],
   },
   // settings_selenite_layout.py
   setnav: {
@@ -53,19 +137,61 @@ export const PLATES = {
     feathers: [],
     content: [[24, 24, 784, 344]],
   },
-  // phone_layout.py
-  agentfull: {
-    w: 378, h: 760, inset: 12, fibre: 91, seed: 456,
-    poly: [[0, 26], [26, 0], [220, 0], [226, 6], [346, 6], [378, 30], [378, 552], [362, 552], [362, 712], [326, 760], [34, 760], [0, 726]],
-    feathers: [[180, 640, 40]],
-    content: [[16, 22, 364, 744]],
+  // phone_layout.py: the phone boards
+  phead: {
+    w: 374, h: 64, inset: 10, fibre: 2, seed: 862,
+    poly: [[0, 12], [12, 0], [140, 0], [143, 3], [268, 3], [271, 0], [366, 0], [374, 8], [374, 50], [360, 64], [205, 64], [202, 61], [70, 61], [67, 64], [0, 64]],
+    feathers: [],
+    content: [[10, 10, 364, 54]],
+  },
+  pcompose: {
+    w: 374, h: 114, inset: 10, fibre: -3, seed: 891,
+    poly: [[0, 14], [16, 0], [220, 0], [220, 6], [358, 6], [374, 22], [374, 100], [360, 114], [50, 114], [0, 82]],
+    feathers: [],
+    content: [[10, 18, 352, 94]],
+    // conform on the board: c-nudges
+  },
+  drawer: {
+    w: 306, h: 760, inset: 12, fibre: 87, seed: 920,
+    poly: [[0, 30], [20, 0], [262, 0], [306, 92], [306, 196], [292, 196], [292, 470], [302, 500], [302, 676], [280, 760], [14, 760], [0, 740]],
+    feathers: [[120, 560, 54]],
+    content: [[12, 20, 294, 748]],
+    // conform on the board: d-new, d-row1, d-tray
   },
   sheet: {
     w: 414, h: 412, inset: 12, fibre: 4, seed: 485,
     poly: [[0, 40], [40, 18], [150, 18], [160, 6], [250, 6], [256, 0], [330, 0], [370, 22], [414, 22], [414, 412], [0, 412]],
     feathers: [],
-    content: [[24, 40, 390, 400]],
+    content: [[24, 26, 390, 334]],
   },
+  pagent: {
+    w: 378, h: 454, inset: 12, fibre: 88, seed: 949,
+    poly: [[0, 26], [26, 0], [200, 0], [206, 6], [346, 6], [378, 30], [378, 318], [362, 318], [362, 414], [326, 454], [34, 454], [0, 420]],
+    feathers: [],
+    content: [[12, 18, 366, 432]],
+    // conform on the board: a-ask, a-comp
+  },
+  agentfull: {
+    w: 378, h: 760, inset: 12, fibre: 91, seed: 456,
+    poly: [[0, 26], [26, 0], [220, 0], [226, 6], [346, 6], [378, 30], [378, 552], [362, 552], [362, 712], [326, 760], [34, 760], [0, 726]],
+    feathers: [[180, 640, 40]],
+    content: [[14, 22, 366, 742]],
+    // conform on the board: f-ask, f-comp
+  },
+  menu: {
+    w: 228, h: 236, inset: 10, fibre: 86, seed: 978,
+    poly: [[0, 0], [190, 0], [228, 30], [228, 236], [36, 236], [0, 200]],
+    feathers: [],
+    content: [[10, 12, 218, 218]],
+    // conform on the board: m-copy, m-del
+  },
+  lift: {
+    w: 370, h: 238, inset: 12, fibre: 3, seed: 1007,
+    poly: [[0, 18], [18, 0], [300, 0], [306, 6], [370, 6], [370, 214], [346, 238], [0, 238]],
+    feathers: [],
+    content: [[16, 20, 352, 214]],
+  },
+
 };
 
 /**
@@ -160,13 +286,18 @@ function paintInWorker(cfg, ss) {
   });
 }
 
-const CACHE = "selenite-v1";
-const KINDS = ["zone", "mask", "spec", "disp", "under"];
+const CACHE = "selenite-v2";
+const KINDS = ["zone", "mask", "clear", "edge", "spec", "disp", "under"];
 const cacheUrl = (key, kind) => new URL(`selenite-cache/${key}/${kind}`, location.href).href;
 
+let oldCachesGone = false;
 async function fromCache(key) {
   try {
     if (!("caches" in self)) return null;
+    if (!oldCachesGone) {
+      oldCachesGone = true;
+      caches.delete("selenite-v1"); // painted before plates had a clear zone
+    }
     const c = await caches.open(CACHE);
     const meta = await c.match(cacheUrl(key, "meta"));
     if (!meta) return null;
@@ -231,6 +362,38 @@ function painted(name, w, h) {
 
 // ------------------------------------------------------------------- plates
 
+/** Signed distance from a point to a polygon, positive inside. */
+export function signedDistance(poly, px, py) {
+  let best = Infinity;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ax, ay] = poly[j];
+    const [cx, cy] = poly[i];
+    if (ay > py !== cy > py && px < ((cx - ax) * (py - ay)) / (cy - ay) + ax) inside = !inside;
+    const dx = cx - ax;
+    const dy = cy - ay;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1e-9)));
+    best = Math.min(best, Math.hypot(px - ax - t * dx, py - ay - t * dy));
+  }
+  return (inside ? 1 : -1) * best;
+}
+
+/**
+ * Whether a box (plate pixels, [x0, y0, x1, y1]) lies wholly in a fitted
+ * plate's clear zone: every point of its edge at least `inset` inside the
+ * outline. Checked every 4 px along the edge, with half a pixel of slack.
+ */
+export function clearOf(cfg, [x0, y0, x1, y1]) {
+  const steps = (a, b) => {
+    const n = Math.max(2, Math.ceil((b - a) / 4) + 1);
+    return Array.from({ length: n }, (_, i) => a + ((b - a) * i) / (n - 1));
+  };
+  const xs = steps(x0, x1);
+  const ys = steps(y0, y1);
+  const pts = [...xs.flatMap((x) => [[x, y0], [x, y1]]), ...ys.flatMap((y) => [[x0, y], [x1, y]])];
+  return pts.every(([x, y]) => signedDistance(cfg.poly, x, y) >= cfg.inset - 0.5);
+}
+
 let filterSvg = null;
 function filterFor(id, w, h, href, scale) {
   if (!filterSvg) {
@@ -280,9 +443,12 @@ const FALLBACK = "blur(12px) saturate(1.1) brightness(1.05)";
  *   inside  put the plate inside the host (for dialogs, which sit in the top
  *           layer) instead of in the page's plate layer under everything
  *   blur    the backdrop blur under the bend (0.3 px; the model list uses 9)
+ *   cut     a selector for the controls on this plate that the crystal may cut
+ *           (the boards' "conform" elements): any of them that crosses the
+ *           plate's clear zone is masked to it, with a faint ring along the cut
  * Returns { update(), remove() }.
  */
-export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = false, blur = 0.3 } = {}) {
+export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = false, blur = 0.3, cut = "" } = {}) {
   const g = { l: 0, t: 0, r: 0, b: 0, ...grow };
   const id = `f-sel-${++plateCount}`;
   const el = document.createElement("div");
@@ -294,8 +460,10 @@ export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = 
   const fx = el.querySelector(".fx");
   const under = el.querySelector(".under");
   fx.style.background = `rgba(10,8,18,${Math.min(0.92, smoke)})`;
-  if (inside) host.prepend(el);
-  else layer().append(el);
+  if (inside) {
+    host.prepend(el);
+    host.classList.add("plate-host");
+  } else layer().append(el);
 
   let size = "";
   let removed = false;
@@ -359,9 +527,48 @@ export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = 
       gl.append(t);
     });
     el.classList.remove("pending");
+    current = { w, h, urls: p.urls };
+    cutControls();
   }
 
-  const ro = new ResizeObserver(() => place());
+  // ---- controls the crystal cuts
+  let current = null; // the painted size and images
+  let cutFrame = 0;
+  function cutControls() {
+    cutFrame = 0;
+    if (!cut || removed) return;
+    const r = host.getBoundingClientRect();
+    const ox = r.left - g.l;
+    const oy = r.top - g.t;
+    const cfg = current && fitPlate(name, current.w, current.h);
+    for (const c of host.querySelectorAll(cut)) {
+      const b = c.getBoundingClientRect();
+      const rect = [b.left - ox, b.top - oy, b.right - ox, b.bottom - oy];
+      if (!cfg || !b.width || clearOf(cfg, rect)) {
+        if (c.classList.contains("cut")) {
+          c.classList.remove("cut");
+          for (const v of ["--cut-clear", "--cut-edge", "--cut-pos", "--cut-size"]) c.style.removeProperty(v);
+        }
+        continue;
+      }
+      c.classList.add("cut");
+      c.style.setProperty("--cut-clear", `url("${current.urls.clear}")`);
+      c.style.setProperty("--cut-edge", `url("${current.urls.edge}")`);
+      c.style.setProperty("--cut-pos", `${-rect[0]}px ${-rect[1]}px`);
+      c.style.setProperty("--cut-size", `${current.w}px ${current.h}px`);
+    }
+  }
+  const recut = () => {
+    if (cut && !cutFrame) cutFrame = requestAnimationFrame(cutControls);
+  };
+  const mo = cut ? new MutationObserver(recut) : null;
+  mo?.observe(host, { childList: true, subtree: true });
+  if (cut) host.addEventListener("scroll", recut, { capture: true, passive: true });
+
+  const ro = new ResizeObserver(() => {
+    place();
+    recut();
+  });
   ro.observe(host);
   addEventListener("resize", place);
   place();
@@ -373,8 +580,13 @@ export function addPlate(host, name, { smoke = baseSmoke(), grow = {}, inside = 
       removed = true;
       clearTimeout(timer);
       ro.disconnect();
+      mo?.disconnect();
+      cancelAnimationFrame(cutFrame);
+      host.removeEventListener("scroll", recut, { capture: true });
+      for (const c of host.querySelectorAll(".cut")) c.classList.remove("cut");
       removeEventListener("resize", place);
       el.remove();
+      if (inside) host.classList.remove("plate-host");
       filterSvg?.querySelector(`#${id}`)?.remove();
     },
   };

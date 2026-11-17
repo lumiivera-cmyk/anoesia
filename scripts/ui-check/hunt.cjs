@@ -45,16 +45,14 @@ const SETTINGS = (phone) => [
   ["settings agent", settings("/agent")],
   ["settings typing", settings("/typing")],
 ];
-// The same Settings screens in selenite (your material set to selenite first).
-const SELENITE = (phone) => SETTINGS(phone).map(([n, f]) => [n.replace("settings", "selenite settings"), then(send("PATCH", "/api/settings", { background: { material: "selenite" } }), f)]);
-const SCREENS = {
+const LACQUER = {
   desk: [
     ["chat", chat("Backstage")],
     ["chat empty", chat("Night market")],
     ["chat settings", then(chat("Backstage"), tap("#open-chat-settings"))],
     ["settings from the sidebar", then(chat("Backstage"), tap('#side a[href="#/settings"]'))],
+    ["agent", then(chat("Backstage"), tap("#open-agent"))],
     ...SETTINGS(false),
-    ...SELENITE(false),
     ["prompts", prompts],
     ["prompts sent", then(prompts, tap("#pv-sent"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -73,8 +71,8 @@ const SCREENS = {
     ["message menu", then(chat("Backstage"), tap("#messages .msg:last-of-type .msg-body"))],
     ["chat settings", then(chat("Backstage"), tap("#phone-title"))],
     ["settings from the drawer", then(chat("Backstage"), tap("#open-drawer"), tap('#drawer a[href="#/settings"]'))],
+    ["agent", then(chat("Backstage"), tap("#open-agent-phone"))],
     ...SETTINGS(true),
-    ...SELENITE(true),
     ["prompts", prompts],
     ["prompts preview", then(prompts, tap("#tab-preview"))],
     ["prompts move menu", then(prompts, tap("#block-list .bumps"))],
@@ -85,6 +83,9 @@ const SCREENS = {
     ["card delete", then(card("Ada"), tap("[data-delete-card]"))],
   ],
 };
+// Every screen twice: in lacquer, and in selenite (your material set to selenite first).
+const toSelenite = ([n, f]) => [`selenite ${n}`, then(send("PATCH", "/api/settings", { background: { material: "selenite" } }), f)];
+const SCREENS = Object.fromEntries(Object.entries(LACQUER).map(([dev, list]) => [dev, [...list, ...list.map(toSelenite)]]));
 const VP = { desk: { viewport: { width: 1440, height: 900 } }, phone: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } };
 const CONTROLS = `() => {
   const top = [...document.querySelectorAll("dialog[open]")].pop();
@@ -128,7 +129,7 @@ const TEXTS = `() => { const out = [];
     let setupErr = null;
     try { await setup(p); } catch (e) { setupErr = String(e).split("\n")[0]; }
     // selenite plates paint in a worker: measure once they're up (the click test doesn't need them)
-    await p.waitForFunction(() => !document.querySelector(".plate.pending"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
+    await p.waitForFunction(() => !document.querySelector(".plate.pending:not([hidden])"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
     const r = { errors: [...errs], setupErr };
     await p.addScriptTag({ path: AXE });
     r.axe = await p.evaluate(async () => { const top = [...document.querySelectorAll("dialog[open]")].pop();
@@ -166,7 +167,7 @@ const TEXTS = `() => { const out = [];
     }
     results[key] = r;
     const bad = r.clicks.filter((c) => c[1] !== "ok");
-    console.log(`${key}: ${setupErr ? "SETUP " + setupErr + " " : ""}errors ${r.errors.length}, axe ${r.axe.reduce((a, v) => a + v.count, 0)} in ${r.axe.length} rules, controls ${r.clicks.length} (${bad.length} flagged), trunc ${r.layout.trunc.length}, spill ${r.layout.spill.length}, offboard ${r.layout.offboard.length}, small ${r.layout.small.length}, clip384 ${r.layout.clip384.length}`);
+    console.log(`${key}: ${setupErr ? "SETUP " + setupErr + " " : ""}errors ${r.errors.length}, axe ${r.axe.reduce((a, v) => a + v.count, 0)} in ${r.axe.length} rules, controls ${r.clicks.length} (${bad.length} flagged), trunc ${r.layout.trunc.length}, spill ${r.layout.spill.length}, offboard ${r.layout.offboard.length}, small ${r.layout.small.length}, clip384 ${r.layout.clip384.length}${r.errors.length ? "\n  " + r.errors.join("\n  ") : ""}`);
     await ctx.close();
   }
   await b.close();

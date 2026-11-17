@@ -19,7 +19,7 @@
 import { $, api, attempt, dayLabel, escapeHtml, fmt, go, isPhone, shortModel, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { closeOverlay, confirmDialog, openOverlay } from "./overlay.js";
-import { applyBackground, belowReadable, dialogPlate, FINISHES, hasWindow, preparePhoto, readable, readableDim, tubesSvg, windowDefault } from "./theme.js";
+import { applyBackground, belowReadable, FINISHES, hasWindow, preparePhoto, readable, readableDim, tubesSvg, windowDefault } from "./theme.js";
 import { openAgentTab } from "./agent.js";
 
 const SECTIONS = {
@@ -566,8 +566,6 @@ function openPicker(opener) {
     focus: "#model-q",
     onClose: () => opener.isConnected && opener.setAttribute("aria-expanded", "false"),
   });
-  // selenite: the model list gets its own plate (+0.3 smoke, like the phone sheets)
-  dialogPlate(dlg, ["smodel", { extra: 0.3, blur: 9 }], ["sheet", { extra: 0.3, blur: 10, grow: { l: 12, r: 12, b: 16 } }]);
   loadModels(p.provider);
 }
 
