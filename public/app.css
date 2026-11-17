@@ -86,6 +86,10 @@ dialog.glass{background-color:rgba(10,9,14,.94)}
 .cast-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .chip{height:44px;display:flex;align-items:center;gap:7px;padding:0 12px 0 7px;border-radius:14px;text-decoration:none;font-size:var(--fs-sm);font-weight:700}
 .chip-you{font-weight:400;color:var(--ink-4)}
+button.chip{border:0;font-family:inherit;color:var(--ink-1);cursor:pointer}
+.chip.is-offstage{color:var(--ink-3)}
+.gem.is-offstage,.chip.is-offstage .gem{opacity:.42}
+.scene-btn{height:44px;padding:0 12px 0 8px;gap:6px;color:var(--ink-3)}
 .gem.is-persona{filter:saturate(.55)}
 .gem-i{position:relative}
 .head-buttons{display:flex;gap:6px}
@@ -401,6 +405,20 @@ dialog.menu{position:fixed;inset:auto;min-width:228px;max-width:calc(100vw - 16p
 .menu-rule{display:block;height:1px;margin:4px 12px;background:rgba(255,255,255,.12)}
 .menu-head{padding:8px 12px 6px;display:flex;flex-direction:column;border-bottom:1px solid rgba(255,255,255,.1);margin:0 0 4px}
 .mh-t{font-size:var(--fs-sm);font-weight:700}
+/* the scene: who's onstage, and the chat's notes (a sheet on a phone) */
+dialog.scene-menu{width:340px;padding:6px;max-height:min(80dvh,600px);overflow:auto}
+.sc-h{display:flex;align-items:baseline;gap:8px;margin:12px 12px 4px}
+.sc-h .meta{text-transform:none;letter-spacing:0;font-weight:400}
+.sc-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.sc-row{display:flex;align-items:center;gap:10px;padding:6px 12px;min-height:52px;box-sizing:border-box}
+.sc-text{display:flex;flex-direction:column;min-width:0;flex:1}
+.sc-n{font-size:var(--fs-sm);font-weight:700}
+.sc-text .meta,.sc-line{font-size:var(--fs-xs);line-height:18px;font-weight:400;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-empty{padding:6px 12px}
+.scene-menu .sc-note{height:auto;min-height:56px;padding:6px 12px;color:var(--ink-1)}
+.scene-menu .sc-note svg{color:var(--ink-4);flex:none}
+.scene-menu .switch,.scene-menu .switch:hover{width:46px;height:28px;padding:0;border-radius:14px;display:block;background:var(--switch-off-bg)}
+.scene-menu .switch[aria-checked="true"],.scene-menu .switch[aria-checked="true"]:hover{background:var(--blue)}
 #role-menu button{gap:10px}
 #role-menu button[aria-checked="true"]{background:var(--ghost-hover)}
 #role-menu .role{pointer-events:none}

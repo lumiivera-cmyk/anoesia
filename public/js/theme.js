@@ -220,6 +220,7 @@ const DIALOG_PLATES = {
   // the lifted message and the menu under it (phone only)
   "message-menu": [null, [["#lifted", "lift", { extra: 0.3 }], ["#message-menu-items", "menu", { extra: 0.3 }]]],
   "role-menu": [null, SHEET],
+  "scene-menu": [null, SHEET],
   "pick-menu": [null, SHEET],
   "move-menu": [null, ["pmenu", { extra: 0.3 }]],
   "colour-picker": [["cpick", { extra: 0.3, blur: 9 }], SHEET],

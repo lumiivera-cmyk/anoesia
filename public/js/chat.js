@@ -26,6 +26,7 @@ import {
 } from "./core.js";
 import { icon } from "./icons.js";
 import { closeOverlay, confirmDialog, openOverlay } from "./overlay.js";
+import { isOffstage, openScene, stageLine, toggleStage } from "./scene.js";
 import { renderSide } from "./side.js";
 
 // ------------------------------------------------------------------ opening
@@ -91,18 +92,21 @@ export function renderChat(scrollToEnd = false) {
   const count = state.messages.length;
   $("chat-name").textContent = chat ? chat.name : "Anoesia";
   $("chat-meta").textContent = chat ? `narrator · ${count} message${count === 1 ? "" : "s"}` : "";
+  // Each chip is its card's onstage switch: one tap moves them on or off stage.
   $("cast-chips").innerHTML = cast
-    .map((c) =>
-      c.isPersona
-        ? `<li><a class="sunk press chip" href="#/cards/${c.id}">${gem(c, 26)}${escapeHtml(c.name)} <span class="chip-you">· you</span></a></li>`
-        : `<li><a class="raised press chip" href="#/cards/${c.id}">${gem(c, 26)}${escapeHtml(c.name)}</a></li>`,
-    )
+    .map((c) => {
+      const off = isOffstage(c.id);
+      return `<li><button type="button" class="${c.isPersona ? "sunk" : "raised"} press chip${off ? " is-offstage" : ""}" data-chip="${c.id}" aria-pressed="${!off}" aria-label="${escapeHtml(c.name)} onstage" title="${escapeHtml(c.name)}: ${stageLine(c.id)}. Tap to move ${off ? "onstage" : "offstage"}">${gem(c, 26)}${escapeHtml(c.name)}${c.isPersona ? ' <span class="chip-you">· you</span>' : ""}${off ? ' <span class="chip-you">· off</span>' : ""}</button></li>`;
+    })
     .join("");
   const others = cast.filter((c) => !c.isPersona);
+  const onNames = others.filter((c) => !isOffstage(c.id)).map(shortName);
+  const offCount = others.length - onNames.length;
+  const castLine = others.length ? `${onNames.join(", ") || "nobody onstage"}${offCount ? ` · ${offCount} off` : ""}` : "no cast yet";
   $("phone-title").innerHTML = `<span class="pt-name">${escapeHtml(chat ? chat.name : "Anoesia")}</span>
-    <span class="pt-line">${others.length ? `<span class="pt-gems">${others.map((c) => gem(c, 12, { label: false })).join("")}</span>` : ""}<span class="meta">${escapeHtml(chat ? `${others.map(shortName).join(", ") || "no cast yet"}` : "")}</span></span>`;
-  $("phone-title").setAttribute("aria-label", `${chat ? `${chat.name} ${others.map(shortName).join(", ") || "no cast yet"}` : "Anoesia"}: chat settings`);
-  for (const id of ["go-preview", "go-prompts", "open-chat-settings", "open-chat-menu", "phone-title"]) {
+    <span class="pt-line">${others.length ? `<span class="pt-gems">${others.map((c) => gem(c, 12, { label: false, extraClass: isOffstage(c.id) ? "is-offstage" : "" })).join("")}</span>` : ""}<span class="meta">${escapeHtml(chat ? castLine : "")}</span></span>`;
+  $("phone-title").setAttribute("aria-label", `${chat ? `${chat.name} ${castLine}` : "Anoesia"}: chat settings`);
+  for (const id of ["go-preview", "go-prompts", "open-chat-settings", "open-chat-menu", "phone-title", "open-scene"]) {
     const el = $(id);
     if (chat) el.removeAttribute("aria-disabled");
     else el.setAttribute("aria-disabled", "true");
@@ -434,6 +438,13 @@ export function wireChat() {
   $("cm-settings").innerHTML = icon.sliders();
 
   $("messages").addEventListener("click", onMessageClick);
+  $("cast-chips").addEventListener("click", async (e) => {
+    const chip = e.target.closest("[data-chip]");
+    if (!chip) return;
+    const id = chip.dataset.chip;
+    if (await toggleStage(id)) $("cast-chips").querySelector(`[data-chip="${CSS.escape(id)}"]`)?.focus();
+  });
+  document.addEventListener("anoesia:stage-changed", () => renderChat());
   $("composer").addEventListener("submit", send);
   $("continue").addEventListener("click", () => {
     if (!state.busy && state.chatId) run(() => api("POST", `/api/chats/${state.chatId}/send`, { content: "" }));
@@ -467,6 +478,7 @@ export function wireChat() {
   };
   $("open-chat-settings").addEventListener("click", guard((e) => openChatSettings(e.currentTarget)));
   $("phone-title").addEventListener("click", guard((e) => openChatSettings(e.currentTarget)));
+  $("open-scene").addEventListener("click", guard((e) => openScene(e.currentTarget)));
   $("go-preview").addEventListener("click", guard(() => {}));
   $("go-prompts").addEventListener("click", guard(() => {}));
   $("open-chat-menu").addEventListener("click", guard((e) => openOverlay($("chat-menu"), { opener: e.currentTarget, anchor: e.currentTarget, focus: "[role=menuitem]" })));

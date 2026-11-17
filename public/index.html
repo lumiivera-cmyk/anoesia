@@ -71,6 +71,7 @@
               <label class="sr" for="composer-input" id="composer-label">Write your turn</label>
               <textarea id="composer-input" rows="2" placeholder="Write your turn…"></textarea>
               <div class="composer-row">
+                <button type="button" class="ghost press btn scene-btn" id="open-scene" aria-haspopup="dialog" title="Who's onstage, and this chat's notes">scene</button>
                 <span class="meta hint wide-only" id="enter-hint">enter sends · shift+enter for a new line</span>
                 <button type="button" class="ghost press btn continue" id="continue" title="Send without new text and let the narrator go on">continue</button>
                 <button type="submit" class="press ib send" id="send" aria-label="Send"></button>
@@ -202,6 +203,9 @@
         <button type="button" role="menuitem" class="press" data-act="chat-settings"><span class="mi" id="cm-settings"></span>Chat settings</button>
       </div>
     </dialog>
+
+    <!-- The scene: who's onstage, and the chat's notes (js/scene.js). -->
+    <dialog class="ov menu raised pop sheet-on-phone scene-menu" id="scene-menu" aria-labelledby="scene-title" data-side="above"></dialog>
 
     <dialog class="ov menu raised pop msg-menu" id="message-menu" aria-label="Message actions">
       <div class="lifted raised" id="lifted" aria-hidden="true"></div>

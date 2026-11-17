@@ -41,6 +41,10 @@ if (!process.env.EMPTY) {
   const chat = await call("POST", "/api/chats", { name: "Backstage", cast: [id("Old Town"), id("The Night Market"), id("Bo"), id("Cy"), me.id, id("Ada")] });
   for (const t of ["*Hana knocks on the green room door.*", "Is this a bad time?", "I brought the new setlist."]) await call("POST", `/api/chats/${chat.id}/send`, { content: t });
   await call("POST", `/api/chats/${chat.id}/regenerate`, {});
+  // Bo offstage, and one of the two notes filled, so both states show.
+  await call("PATCH", `/api/chats/${chat.id}`, { offstage: [id("Bo")] });
+  const now = (await call("GET", `/api/chats/${chat.id}/blocks`)).find((b: any) => b.title === "Right now");
+  await call("PATCH", `/api/blocks/${now.id}`, { content: "The green room, an hour before doors. Ada is icing her wrist." });
   await call("POST", "/api/chats", { name: "Night market", cast: [id("The Night Market"), me.id, id("Bo")] });
   // A background photo, if you point PHOTO at one (none are in the repo).
   if (process.env.PHOTO) {
