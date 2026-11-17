@@ -153,9 +153,16 @@ const TEXTS = `() => { const out = [];
         if (dirty) await restart();
         dirty = false;
         await p.goto("about:blank"); await setup(p);
-        await p.evaluate(eval(CONTROLS));
-        const loc = p.locator(`[data-hunt-i="${i}"]`);
-        if (!(await loc.count())) { r.clicks.push([label, "GONE after reload"]); continue; }
+        // Find the control again by its label: after a server restart the page can hold a different
+        // number of hidden controls (another chat's agent, say), so its index can move.
+        let loc = null;
+        for (let t = 0; t < 10 && !loc; t++) {
+          const now = await p.evaluate(eval(CONTROLS));
+          const same = now.find(([j, l]) => j === i && l === label) ?? now.find(([, l]) => l === label);
+          if (same) loc = p.locator(`[data-hunt-i="${same[0]}"]`);
+          else await p.waitForTimeout(400);
+        }
+        if (!loc || !(await loc.count())) { r.clicks.push([label, "GONE after reload"]); continue; }
         const before = await p.evaluate(eval(SNAP));
         errs.length = 0;
         let res;
