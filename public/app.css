@@ -729,6 +729,8 @@ html[data-view="settings"] .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),.3))}
 html.sel .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),var(--dim-floor,.3)))}
 .bg .tubes{position:absolute;inset:0;width:100%;height:100%;display:none}
 .sel:not(.has-photo) .bg .tubes{display:block}
+/* the headers' captions sit on the plates' frost: one step brighter than meta elsewhere */
+.sel .page-head .meta,.sel .chat-head .meta{color:var(--ink-3)}
 /* text on crystal gets the boards' soft shadow */
 .sel .app,.sel .agent-panel,.sel dialog.on-plate{text-shadow:0 1px 2px rgba(0,0,0,.6),0 0 10px rgba(0,0,0,.35)}
 /* the panes give way to their plates */
