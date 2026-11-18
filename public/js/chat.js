@@ -96,7 +96,7 @@ export function renderChat(scrollToEnd = false) {
   $("cast-chips").innerHTML = cast
     .map((c) => {
       const off = isOffstage(c.id);
-      return `<li><button type="button" class="${c.isPersona ? "sunk" : "raised"} press chip${off ? " is-offstage" : ""}" data-chip="${c.id}" aria-pressed="${!off}" aria-label="${escapeHtml(c.name)} onstage" title="${escapeHtml(c.name)}: ${stageLine(c.id)}. Tap to move ${off ? "onstage" : "offstage"}">${gem(c, 26)}${escapeHtml(c.name)}${c.isPersona ? ' <span class="chip-you">· you</span>' : ""}${off ? ' <span class="chip-you">· off</span>' : ""}</button></li>`;
+      return `<li><button type="button" class="${c.isPersona ? "sunk" : "raised"} press chip${off ? " is-offstage" : ""}" data-chip="${c.id}" aria-pressed="${!off}" title="${escapeHtml(c.name)}: ${stageLine(c.id)}. Tap to move ${off ? "onstage" : "offstage"}">${gem(c, 26)}${escapeHtml(c.name)}${c.isPersona ? ' <span class="chip-you">· you</span>' : ""}${off ? ' <span class="chip-you">· off</span>' : ""}</button></li>`;
     })
     .join("");
   const others = cast.filter((c) => !c.isPersona);

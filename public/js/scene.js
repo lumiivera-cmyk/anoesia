@@ -67,7 +67,7 @@ function render() {
     .map((n) => {
       const text = n.content.trim();
       const line = text ? escapeHtml(text.split("\n")[0]) : `<span class="faint">empty · ${NOTE_HINTS[n.title] ?? "not sent"}</span>`;
-      return `<li><button type="button" class="sc-note press" data-note="${n.id}" aria-label="Edit ${escapeHtml(n.title)}${text ? "" : ", empty"}">
+      return `<li><button type="button" class="sc-note press" data-note="${n.id}">
         <span class="sc-text"><span class="sc-n">${escapeHtml(n.title)}${n.enabled ? "" : ' <span class="chip-you">· switched off</span>'}</span><span class="sc-line">${line}</span></span>${icon.edit(18)}</button></li>`;
     })
     .join("");
