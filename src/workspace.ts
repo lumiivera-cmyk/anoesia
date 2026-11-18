@@ -5,7 +5,8 @@
  *   cards/<card>/<field>              a card's field ("Description", a custom field)
  *   prompt/main                       the main prompt, shared by every chat
  *   chats/<chat>/messages/<n>         a message (1 is the first), the version shown
- *   chats/<chat>/blocks/<block>       a block on the chat's prompts page
+ *   chats/<chat>/blocks/<block>       a block on the chat's prompts page (its notes too)
+ *   chats/<chat>/cast                 who's onstage and offstage, one "Name: onstage" line each
  *   agent/index.md                    the agent's notes, read at the start of every session
  *   agent/personality.md              how it talks
  *   agent/notes/...                   drafts and anything else it keeps
@@ -19,6 +20,7 @@
 
 import { AgentStore } from "./agentstore.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
+import { heldBack } from "./prompt.ts";
 import type { Store } from "./store.ts";
 import type { AgentEdit, Card, Chat, PromptBlock } from "./types.ts";
 
@@ -41,7 +43,7 @@ type Row = Record<string, unknown>;
 /** A place that holds text, resolved from a path. */
 interface Target {
   path: string;
-  /** Where it lives, for the log: `main`, `field:<id>`, `block:<id>`, `message:<id>:<version>`, `file:<path>`. */
+  /** Where it lives, for the log: `main`, `field:<id>`, `block:<id>`, `message:<id>:<version>`, `cast:<chat id>`, `file:<path>`. */
   key: string;
   /** The text, or null when it doesn't exist (yet). */
   value: string | null;
@@ -107,6 +109,29 @@ export class Workspace {
       });
   }
 
+  /** A chat's cast as text: one "Name: onstage" or "Name: offstage" line per member, in cast order. */
+  castText(chatId: string): string {
+    const chat = this.store.chat(chatId);
+    const cards = new Map(this.store.cards().map((c) => [c.id, c]));
+    return chat.cast.map((id) => `${cards.get(id)?.name ?? id}: ${chat.offstage.includes(id) ? "offstage" : "onstage"}`).join("\n");
+  }
+
+  /** Set who's onstage from "Name: onstage|offstage" lines. Members not named keep their place. */
+  private setCastText(chatId: string, text: string): void {
+    const chat = this.store.chat(chatId);
+    const cards = this.store.cards().filter((c) => chat.cast.includes(c.id));
+    const off = new Set(chat.offstage);
+    for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      const m = /^(.+?)\s*:\s*(onstage|offstage)\s*$/i.exec(line);
+      if (!m) throw new ValidationError(`"${line}" should read "Name: onstage" or "Name: offstage".`);
+      const card = cards.find((c) => c.id === m[1]!.trim()) ?? cards.find((c) => norm(c.name) === norm(m[1]!));
+      if (!card) throw new ValidationError(`${m[1]} isn't in ${chat.name}'s cast. The cast is: ${cards.map((c) => c.name).join(", ") || "(nobody)"}. Adding someone to the cast is the person's call, in chat settings.`);
+      if (norm(m[2]!) === "offstage") off.add(card.id);
+      else off.delete(card.id);
+    }
+    this.store.updateChat(chatId, { offstage: [...off] });
+  }
+
   /** The stored path of an agent file from its path after `agent/` (chat names become ids). */
   private storedFilePath(parts: string[]): string {
     if (parts[0] === "chats" && parts.length >= 2) return ["chats", this.findChat(parts[1]!).id, ...parts.slice(2)].join("/");
@@ -170,6 +195,15 @@ export class Workspace {
         readOnly: "Messages can be edited, not created or deleted, here.",
       };
     }
+    if (root === "chats" && a && b === "cast" && !c) {
+      const chat = this.findChat(a);
+      return {
+        path: `chats/${chat.name}/cast`,
+        key: `cast:${chat.id}`,
+        value: this.castText(chat.id),
+        readOnly: "The cast list always exists. Change who's onstage or offstage by editing its lines.",
+      };
+    }
     if (root === "chats" && a && b === "blocks" && c && rest.length === 0) {
       const chat = this.findChat(a);
       const named = this.blockNames(chat.id);
@@ -182,7 +216,12 @@ export class Workspace {
           key,
           value: block.content,
           remove: block.kind === "text" ? () => this.removeBlock(block.id) : undefined,
-          readOnly: block.kind === "text" ? undefined : "Only the chat's own text blocks can be deleted. Switch this one off on the prompts page instead.",
+          readOnly:
+            block.kind === "text"
+              ? undefined
+              : block.kind === "note"
+                ? "Every chat keeps its notes. Empty this one instead: an empty note sends nothing."
+                : "Only the chat's own text blocks can be deleted. Switch this one off on the prompts page instead.",
         };
       }
       return {
@@ -236,9 +275,12 @@ export class Workspace {
       const chat = this.findChat(a!);
       if (parts.length === 2) {
         const count = this.store.messages(chat.id).length;
+        const cards = new Map(this.store.cards().map((c) => [c.id, c.name]));
+        const names = (ids: string[]) => ids.map((id) => cards.get(id) ?? id).join(", ") || "nobody";
         return [
           { path: `chats/${chat.name}/messages/`, note: `${count} messages` },
-          { path: `chats/${chat.name}/blocks/`, note: "its prompt, block by block" },
+          { path: `chats/${chat.name}/blocks/`, note: "its prompt, block by block, with its notes (Right now, Who knows what)" },
+          { path: `chats/${chat.name}/cast`, note: `onstage: ${names(chat.cast.filter((id) => !chat.offstage.includes(id)))}; offstage: ${names(chat.offstage)}` },
           { path: `agent/chats/${chat.name}/`, note: "your folder for this chat" },
         ];
       }
@@ -250,12 +292,14 @@ export class Workspace {
         }));
       }
       if (parts.length === 3 && b === "blocks") {
+        const cards = new Map(this.store.cards().map((c) => [c.id, c]));
         return this.store.blocks(chat.id).map((block) => {
           if (block.kind === "history") return { path: `chats/${chat.name}/messages/`, note: "the chat history goes here" };
           const name = this.blockNames(chat.id).find((x) => x.block.id === block.id)!.name;
           const where = block.depth === null ? "" : `, depth ${block.depth}`;
-          const source = block.kind === "main" ? "shared main prompt" : block.kind === "field" ? "card field" : "this chat's own";
-          return { path: `chats/${chat.name}/blocks/${name}`, note: `${source}, ${block.role}${where}${block.enabled ? "" : ", off"}` };
+          const source = block.kind === "main" ? "shared main prompt" : block.kind === "field" ? "card field" : block.kind === "note" ? "this chat's note" : "this chat's own";
+          const held = heldBack(block, cards) ? ", not sent: its card is offstage" : "";
+          return { path: `chats/${chat.name}/blocks/${name}`, note: `${source}, ${block.role}${where}${block.enabled ? "" : ", off"}${block.kind === "note" && !block.content.trim() ? ", empty" : ""}${held}` };
         });
       }
     }
@@ -350,7 +394,14 @@ export class Workspace {
     const rest = key.slice(kind!.length + 1);
     if (kind === "main") return this.store.settings().mainPrompt;
     if (kind === "field") return (this.store.db.query("SELECT content FROM card_fields WHERE id = ?").get(id!) as { content: string } | null)?.content ?? null;
-    if (kind === "block") return (this.store.db.query("SELECT content FROM prompt_blocks WHERE id = ? AND kind = 'text'").get(id!) as { content: string } | null)?.content ?? null;
+    if (kind === "block") return (this.store.db.query("SELECT content FROM prompt_blocks WHERE id = ? AND kind IN ('text', 'note')").get(id!) as { content: string } | null)?.content ?? null;
+    if (kind === "cast") {
+      try {
+        return this.castText(id!);
+      } catch {
+        return null;
+      }
+    }
     if (kind === "message") {
       try {
         return this.store.message(id!).swipes[Number(version)] ?? null;
@@ -379,7 +430,8 @@ export class Workspace {
       const swipes = [...m.swipes];
       swipes[index] = text;
       this.store.db.query("UPDATE messages SET swipes = ?, edited_at = ? WHERE id = ?").run(JSON.stringify(swipes), new Date().toISOString(), id!);
-    } else if (kind === "file") this.agent.writeFile(rest, text);
+    } else if (kind === "cast") this.setCastText(id!, text);
+    else if (kind === "file") this.agent.writeFile(rest, text);
     else throw new ValidationError(`Unknown change target ${key}.`);
   }
 

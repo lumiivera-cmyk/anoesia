@@ -44,7 +44,7 @@ test("a migration added after 5 runs, on a new database and on an existing one",
 test("a database from the lacquer branch (colours and photos at 4) gets the agent tables", () => {
   const file = path();
   const old = openDatabase(file);
-  old.exec("DROP TABLE agent_edits; DROP TABLE agent_messages; DROP TABLE agent_sessions; DROP TABLE agent_files; PRAGMA user_version = 4");
+  old.exec("DROP TABLE agent_edits; DROP TABLE agent_messages; DROP TABLE agent_sessions; DROP TABLE agent_files; ALTER TABLE chat_cast DROP COLUMN onstage; PRAGMA user_version = 4");
   old.close();
   const db = openDatabase(file);
   expect(tables(db)).toEqual(expect.arrayContaining(["agent_files", "agent_sessions", "agent_messages", "agent_edits", "photos"]));
@@ -54,11 +54,37 @@ test("a database from the lacquer branch (colours and photos at 4) gets the agen
 test("a database at 5 (the agent and lacquer merged) gets the agent sessions' scope (6)", () => {
   const file = path();
   const old = openDatabase(file);
-  old.exec("ALTER TABLE agent_sessions DROP COLUMN scope; PRAGMA user_version = 5");
+  old.exec("ALTER TABLE agent_sessions DROP COLUMN scope; ALTER TABLE chat_cast DROP COLUMN onstage; PRAGMA user_version = 5");
   old.exec("INSERT INTO agent_sessions (id, title, created_at, updated_at) VALUES ('s', 'Old', 'x', 'x')");
   old.close();
   const db = openDatabase(file);
   expect((db.query("SELECT scope FROM agent_sessions WHERE id = 's'").get() as { scope: string }).scope).toBe("main");
-  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(6);
+  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(REAL);
+  db.close();
+});
+
+test("a database at 6 gets cast presence and chat notes (7), keeping its blocks", () => {
+  const file = path();
+  const old = openDatabase(file);
+  old.exec(`
+    ALTER TABLE chat_cast DROP COLUMN onstage;
+    DROP TABLE prompt_blocks;
+    CREATE TABLE prompt_blocks (
+      id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('main', 'text', 'field', 'history')),
+      card_id TEXT REFERENCES cards(id) ON DELETE CASCADE, field_id TEXT REFERENCES card_fields(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT 'system',
+      enabled INTEGER NOT NULL DEFAULT 1, depth INTEGER, position INTEGER NOT NULL
+    );
+    INSERT INTO chats (id, name, created_at, updated_at) VALUES ('c', 'Old', 'x', 'x');
+    INSERT INTO prompt_blocks (id, chat_id, kind, title, content, position) VALUES ('b', 'c', 'text', 'Mine', 'Kept.', 0);
+    PRAGMA user_version = 6;
+  `);
+  old.close();
+  const db = openDatabase(file);
+  expect((db.query("SELECT content FROM prompt_blocks WHERE id = 'b'").get() as { content: string }).content).toBe("Kept.");
+  db.exec("INSERT INTO prompt_blocks (id, chat_id, kind, title, position) VALUES ('n', 'c', 'note', 'Right now', 1)");
+  expect((db.query("PRAGMA table_info(chat_cast)").all() as { name: string }[]).map((c) => c.name)).toContain("onstage");
+  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(REAL);
   db.close();
 });

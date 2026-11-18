@@ -75,6 +75,11 @@ export interface Chat {
   name: string;
   /** The cards active in it, in the order their blocks go into the prompt. */
   cast: string[];
+  /**
+   * Cast members who are offstage in this chat: only their Description is
+   * sent, and `{{cast}}` leaves them out. Everyone else is onstage.
+   */
+  offstage: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -146,8 +151,12 @@ export interface Background {
   window: number | null;
 }
 
-/** What a prompt block is. */
-export type BlockKind = "main" | "text" | "field" | "history";
+/**
+ * What a prompt block is. `note` is one of the chat's own notes ("Right
+ * now", "Who knows what"): every chat has both, they can't be renamed or
+ * deleted, and an empty one sends nothing.
+ */
+export type BlockKind = "main" | "text" | "field" | "history" | "note";
 
 /** One block on a chat's prompts page. */
 export interface PromptBlock {
@@ -166,6 +175,8 @@ export interface PromptBlock {
   /** null: in its place in the list. A number: inside the chat history, that many messages from the end (0 = after the last). */
   depth: number | null;
   position: number;
+  /** For a field block: its card is offstage in this chat (only the Description is sent). */
+  offstage: boolean;
 }
 
 

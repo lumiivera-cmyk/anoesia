@@ -16,6 +16,15 @@
  *
  * Adjacent system blocks are sent as one system message, because some
  * models only accept one.
+ *
+ * A cast member can be offstage in a chat: then only its Description goes
+ * in, its other fields stay on the prompts page as inactive, and
+ * `{{cast}}` (and `{{char}}`) skip it, so nothing invites someone who
+ * isn't in the scene.
+ *
+ * Each chat has two notes of its own, "Right now" (where the story stands)
+ * and "Who knows what" (one line per secret). They are blocks like any
+ * other, sent under a `## Title` heading, and nothing when empty.
  */
 
 import { fillMacros, type MacroEnv } from "./macros.ts";
@@ -25,6 +34,16 @@ import type { Card, ChatMessage, Message, PromptBlock } from "./types.ts";
 export { listNames } from "./macros.ts";
 
 export const DEFAULT_MAIN_PROMPT = `This is a roleplay between {{user}} and you, the narrator. You write the world and everyone in it: {{cast}}. {{user}} is written only by the user: never write their words, actions or thoughts.`;
+
+/** The chat notes every chat has, in the order a new chat gets them. */
+export const CHAT_NOTES = ["Right now", "Who knows what"] as const;
+
+/** Whether a block is left out because its card is offstage: every field but the Description. */
+export function heldBack(block: PromptBlock, cards: Map<string, Card>): boolean {
+  if (block.kind !== "field" || !block.offstage) return false;
+  const field = cards.get(block.cardId ?? "")?.fields.find((f) => f.id === block.fieldId);
+  return field?.key !== "description";
+}
 
 /** One piece of the prompt, as the preview shows it. */
 export interface SentBlock {
@@ -61,14 +80,17 @@ export interface PromptInput {
   random?: () => number;
 }
 
-/** Who's who, from the cards in the blocks, in block order. */
+/** Who's who, from the cards in the blocks, in block order. `characters` is the onstage ones only. */
 export function castOf(blocks: PromptBlock[], cards: Map<string, Card>): { persona: Card | null; characters: Card[] } {
   const seen: Card[] = [];
+  const offstage = new Set<Card>();
   for (const b of blocks) {
     const card = b.cardId ? cards.get(b.cardId) : undefined;
-    if (card && !seen.includes(card)) seen.push(card);
+    if (!card) continue;
+    if (!seen.includes(card)) seen.push(card);
+    if (b.offstage) offstage.add(card);
   }
-  return { persona: seen.find((c) => c.isPersona) ?? null, characters: seen.filter((c) => !c.isPersona && c.isCharacter) };
+  return { persona: seen.find((c) => c.isPersona) ?? null, characters: seen.filter((c) => !c.isPersona && c.isCharacter && !offstage.has(c)) };
 }
 
 /** An item in send order, before macros. */
@@ -104,7 +126,8 @@ export function assemblePrompt(input: PromptInput): AssembledPrompt {
   };
 
   const blockItem = (b: PromptBlock): Item | null => {
-    if (!b.enabled || b.kind === "history" || !b.content.trim()) return null;
+    if (!b.enabled || b.kind === "history" || !b.content.trim() || heldBack(b, input.cards)) return null;
+    if (b.kind === "note") return { label: b.title, source: `block:${b.id}`, role: b.role, text: `## ${b.title}\n\n${b.content.trim()}`, depth: b.depth ?? undefined };
     if (b.kind === "field") {
       const card = input.cards.get(b.cardId ?? "");
       if (!card) return null;

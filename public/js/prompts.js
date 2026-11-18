@@ -70,7 +70,11 @@ function units() {
 
 const inHistory = () => blocks.filter((b) => b.depth !== null && b.kind !== "history");
 const isEmpty = (b) => b.kind !== "history" && !b.content.trim();
-const tokens = (b) => (b.enabled && !isEmpty(b) ? approxTokens(b.content) : 0);
+/** A field of an offstage card, other than its Description: kept here, not sent (src/prompt.ts heldBack). */
+const isHeld = (b) => b.kind === "field" && b.offstage && cardById(b.cardId)?.fields.find((f) => f.id === b.fieldId)?.key !== "description";
+const tokens = (b) => (b.enabled && !isEmpty(b) && !isHeld(b) ? approxTokens(b.content) : 0);
+/** What each chat note is for. */
+const NOTE_HINTS = { "Right now": "where the story stands", "Who knows what": "one line per secret" };
 
 function blockName(b) {
   if (b.kind === "field") {
@@ -95,9 +99,11 @@ function kindLine(card) {
 function sourceLine(b, movedOut) {
   if (b.kind === "main") return "main prompt · shared by every chat";
   if (b.kind === "text") return "this chat's own";
+  if (b.kind === "note") return `this chat's note · ${isEmpty(b) ? "empty, not sent" : (NOTE_HINTS[b.title] ?? "this chat only")}`;
   if (b.kind === "field") {
     const card = cardById(b.cardId);
-    return `from ${card ? `${card.name}'s` : "a"} card${movedOut ? " · moved out of its folder" : ""}${isEmpty(b) ? " · empty, not sent" : ""}`;
+    const state = isHeld(b) ? " · offstage in this chat, not sent" : isEmpty(b) ? " · empty, not sent" : "";
+    return `from ${card ? `${card.name}'s` : "a"} card${movedOut ? " · moved out of its folder" : ""}${state}`;
   }
   return "";
 }
@@ -135,7 +141,7 @@ function grip(key, label) {
 
 function blockIcon(b) {
   if (b.kind === "main") return `<span class="bicon" aria-hidden="true">${icon.main()}</span>`;
-  if (b.kind === "text") return `<span class="bicon" aria-hidden="true">${icon.text()}</span>`;
+  if (b.kind === "text" || b.kind === "note") return `<span class="bicon" aria-hidden="true">${icon.text()}</span>`;
   return "";
 }
 
@@ -144,7 +150,7 @@ function blockHtml(b, { movedOut = false, inFolder = false } = {}) {
   const title = b.kind === "field" ? (movedOut && card ? `${card.name} · ${fieldTitle(b)}` : fieldTitle(b)) : b.title;
   const name = blockName(b);
   const isOpen = open.has(b.id);
-  const tok = tokChip(tokens(b), isEmpty(b));
+  const tok = tokChip(tokens(b), isEmpty(b) || isHeld(b));
   const src = sourceLine(b, movedOut);
   const snippet = inFolder && !isOpen && !isEmpty(b) ? `<div class="snippet">${escapeHtml(b.content.trim().split("\n")[0])}</div>` : "";
   const head = isPhone()
@@ -152,7 +158,7 @@ function blockHtml(b, { movedOut = false, inFolder = false } = {}) {
        <div class="l2">${roleButton(b)}${tok}<span class="grow"></span>${chev(b.id, isOpen, name)}</div>`
     : `<div class="bhead">${blockIcon(b)}<button type="button" class="btitle" data-toggle="${b.id}" aria-expanded="${isOpen}"><span class="t">${escapeHtml(title)}</span><span class="src">${escapeHtml(src)}</span></button>
        ${roleButton(b)}${tok}${switchButton(b.id, b.enabled, name)}${chev(b.id, isOpen, name)}</div>`;
-  return `<div class="raised blk${isPhone() ? " prow" : ""}${b.enabled ? "" : " is-off"}" data-block="${b.id}">
+  return `<div class="raised blk${isPhone() ? " prow" : ""}${b.enabled && !isHeld(b) ? "" : " is-off"}${isHeld(b) ? " is-held" : ""}" data-block="${b.id}">
     ${grip(b.id, name)}${head}${snippet}${isOpen ? bodyHtml(b) : ""}</div>`;
 }
 
@@ -163,7 +169,8 @@ function folderHtml(u) {
   const isOpen = open.has(key);
   const on = u.blocks.some((b) => b.enabled);
   const sum = u.blocks.reduce((n, b) => n + tokens(b), 0);
-  const src = `folder · ${card ? kindLine(card) : "card"} · ${u.blocks.length} block${u.blocks.length === 1 ? "" : "s"}`;
+  const offstage = u.blocks.some((b) => b.offstage);
+  const src = `folder · ${card ? kindLine(card) : "card"} · ${offstage ? "offstage: description only" : `${u.blocks.length} block${u.blocks.length === 1 ? "" : "s"}`}`;
   const inner = isOpen ? `<div class="sunk ${isPhone() ? "pfwell" : "fwell"}" data-well="${u.cardId}"><ol class="well-list">${u.blocks.map((b) => `<li data-in="${b.id}">${blockHtml(b, { inFolder: true })}</li>`).join("")}</ol></div>` : "";
   const fIcon = `<span class="bicon" aria-hidden="true">${icon.folder(20, card)}</span>`;
   const head = isPhone()
@@ -187,7 +194,7 @@ function bodyHtml(b) {
       <button type="button" class="btn raised press" data-edit="${b.id}">${icon.edit(16)} edit</button>
       <button type="button" class="btn ghost press" data-place="${b.id}">${placeLabel}</button>
       ${b.kind === "text" ? `<button type="button" class="btn btn-quiet-danger press" data-delete="${b.id}">${icon.trash(16)} delete block</button>` : ""}
-      <span class="meta src-note">${b.kind === "field" ? "edits the card in every chat" : b.kind === "main" ? "edits the main prompt in every chat" : ""}</span>
+      <span class="meta src-note">${b.kind === "field" ? `edits the card in every chat${isHeld(b) ? " · sent again when the card is onstage" : ""}` : b.kind === "main" ? "edits the main prompt in every chat" : b.kind === "note" ? "this chat only · also one tap from the chat's scene menu" : ""}</span>
     </div>
   </div>`;
 }
@@ -240,14 +247,14 @@ function slotHtml(b, n) {
   const atMin = b.depth <= 0;
   const atMax = b.depth >= n;
   const isOpen = open.has(b.id);
-  return `<div class="slot-wrap" data-block="${b.id}"><div class="raised slot${b.enabled ? "" : " is-off"}">
+  return `<div class="slot-wrap" data-block="${b.id}"><div class="raised slot${b.enabled && !isHeld(b) ? "" : " is-off"}">
     <span class="bicon" aria-hidden="true">${b.kind === "field" ? icon.folder(16, cardById(b.cardId)) : icon.text(16)}</span>
     <button type="button" class="slot-title" data-toggle="${b.id}" aria-expanded="${isOpen}"><span class="t">${escapeHtml(b.kind === "field" ? name : b.title)}</span><span class="src">${escapeHtml(where)}</span></button>
     <span class="depth" role="group" aria-label="Depth for ${escapeHtml(name)}"><span class="meta">depth</span>
       <button type="button" class="step press" data-depth="-1" data-id="${b.id}" aria-label="Move ${escapeHtml(name)} one message later" aria-disabled="${atMin}">−</button>
       <span class="dn">${b.depth}</span>
       <button type="button" class="step press" data-depth="1" data-id="${b.id}" aria-label="Move ${escapeHtml(name)} one message earlier" aria-disabled="${atMax}">+</button></span>
-    ${tokChip(tokens(b), isEmpty(b))}${switchButton(b.id, b.enabled, name)}
+    ${tokChip(tokens(b), isEmpty(b) || isHeld(b))}${switchButton(b.id, b.enabled, name)}
   </div>${isOpen ? bodyHtml(b) : ""}</div>`;
 }
 
@@ -736,7 +743,7 @@ function startEdit(id, opener) {
     const card = b.kind === "field" ? cardById(b.cardId) : null;
     openTextEditor({
       title: b.kind === "field" ? fieldTitle(b) : b.title,
-      sub: b.kind === "field" ? `${card?.name}'s card · in every chat` : b.kind === "main" ? "shared by every chat" : "this chat's own",
+      sub: b.kind === "field" ? `${card?.name}'s card · in every chat` : b.kind === "main" ? "shared by every chat" : b.kind === "note" ? `this chat's note · ${NOTE_HINTS[b.title] ?? "this chat only"}` : "this chat's own",
       text: b.content,
       name: b.kind === "text" ? b.title : null,
       label: `${blockName(b)} text`,
@@ -757,7 +764,7 @@ async function save(b, content, title) {
   const saved = await patch(b.id, change);
   if (!saved) return false;
   editing = null;
-  if (saved.kind !== "text") await loadState();
+  if (saved.kind !== "text" && saved.kind !== "note") await loadState();
   render();
   refreshPreviewSoon();
   $("block-list").querySelector(`[data-edit="${b.id}"]`)?.focus();

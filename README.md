@@ -11,6 +11,19 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
 
 - **Chats**, each with a **cast**: the cards in it, in the order they go into
   the prompt. Reorder them in chat settings.
+- **Onstage and offstage**, per chat. Onstage, a card's every field goes
+  into the prompt, custom fields (a voice bank) included. Offstage, only its
+  Description does: its other blocks stay on the prompts page, marked
+  "offstage in this chat, not sent", and `{{cast}}` lists onstage characters
+  only, so the main prompt never invites someone who isn't in the scene. On
+  a computer each cast chip in the chat header is the switch (one tap); the
+  **scene** button by the composer has the same switches, on a phone too.
+- **Chat notes**: every chat has two notes of its own, **Right now** (where
+  the story stands) and **Who knows what** (one line per secret). They're
+  blocks on the prompts page like any other (move them, change their role,
+  switch them off), sent under their title as a heading, and nothing at all
+  while empty. Edit them from the scene menu, one tap each. Cards describe
+  who someone is; story state belongs here.
 - **Cards** with a name, description, advanced description and system prompt,
   plus custom fields (a voice bank, say). A card can be your persona ("This is
   me", which fills `{{user}}`) or not a character at all (a world or faction,
@@ -63,7 +76,8 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   profile (Settings → Connections → the agent), so it can be a tool-calling
   model while another writes replies. It sees Anoesia as paths:
   `cards/<card>/<field>`, `prompt/main`, `chats/<chat>/messages/<n>`,
-  `chats/<chat>/blocks/<block>`, and its own files under `agent/`
+  `chats/<chat>/blocks/<block>` (the chat's notes too), `chats/<chat>/cast`
+  (one "Name: onstage" or "Name: offstage" line each, to read or flip), and its own files under `agent/`
   (`index.md`, read at the start of every session; `personality.md`;
   `notes/` for drafts; `chats/<chat>/` for each chat). Its tools: list, read,
   grep, edit (find and replace), write, delete, preview the prompt, fill
@@ -108,8 +122,8 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   reorders its folder in every chat.
 
 A new chat's prompt starts as: main prompt, each cast card's fields in cast
-order, then the chat. A card you add to the cast later lands just before the
-chat history.
+order, the chat's two notes, then the chat. A card you add to the cast later
+lands just before the notes and the chat history.
 
 ## Running it
 

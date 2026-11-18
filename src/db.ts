@@ -5,6 +5,7 @@
  *   cards ──< card_fields
  *   chats ──< chat_cast >── cards
  *   chats ──< messages
+ *   chats ──< prompt_blocks
  *
  * Each step in MIGRATIONS moves the layout one version on. SQLite keeps the
  * version in the file (`user_version`), so an old database is upgraded on
@@ -175,6 +176,33 @@ export const MIGRATIONS: string[] = [
   // one chat (its sub-agent, with its own personality and notebook).
   `
   ALTER TABLE agent_sessions ADD COLUMN scope TEXT NOT NULL DEFAULT 'main' CHECK (scope IN ('main', 'chat'));
+  `,
+
+  // 7: cast presence and chat notes. A cast member can be offstage in a
+  // chat (only its Description is sent). Blocks gain the 'note' kind for
+  // the chat's own notes ("Right now", "Who knows what"); SQLite can't
+  // change a CHECK, so the blocks table is rebuilt (nothing points at it).
+  `
+  ALTER TABLE chat_cast ADD COLUMN onstage INTEGER NOT NULL DEFAULT 1;
+
+  CREATE TABLE prompt_blocks_v7 (
+    id       TEXT PRIMARY KEY,
+    chat_id  TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    kind     TEXT NOT NULL CHECK (kind IN ('main', 'text', 'field', 'history', 'note')),
+    card_id  TEXT REFERENCES cards(id) ON DELETE CASCADE,
+    field_id TEXT REFERENCES card_fields(id) ON DELETE CASCADE,
+    title    TEXT NOT NULL DEFAULT '',
+    content  TEXT NOT NULL DEFAULT '',    -- for 'text' and 'note' blocks; linked blocks read their source
+    role     TEXT NOT NULL DEFAULT 'system' CHECK (role IN ('system', 'user', 'assistant')),
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    depth    INTEGER,
+    position INTEGER NOT NULL
+  );
+  INSERT INTO prompt_blocks_v7 (id, chat_id, kind, card_id, field_id, title, content, role, enabled, depth, position)
+    SELECT id, chat_id, kind, card_id, field_id, title, content, role, enabled, depth, position FROM prompt_blocks;
+  DROP TABLE prompt_blocks;
+  ALTER TABLE prompt_blocks_v7 RENAME TO prompt_blocks;
+  CREATE INDEX prompt_blocks_chat ON prompt_blocks(chat_id, position);
   `,
 ];
 

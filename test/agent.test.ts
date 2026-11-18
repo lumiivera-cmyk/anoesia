@@ -141,6 +141,33 @@ describe("edit log and revert", () => {
     expect(agent.file("notes/draft.md")).toBeNull();
   });
 
+  test("the agent reads and flips who's onstage, logged and revertable", () => {
+    const { ws, ctx, store, chat, ada } = world();
+    const bo = store.cards().find((c) => c.name === "Bo")!;
+    store.updateChat(chat.id, { cast: [ada.id, bo.id] });
+    expect(ws.read("chats/Night Market/cast").text).toBe("Ada Vale: onstage\nBo: onstage");
+    expect(ws.list("chats/Night Market").find((e) => e.path.endsWith("/cast"))!.note).toBe("onstage: Ada Vale, Bo; offstage: nobody");
+    const edit = ws.write("chats/Night Market/cast", "Ada Vale: onstage\nBo: offstage", ctx);
+    expect(store.chat(chat.id).offstage).toEqual([bo.id]);
+    expect(edit).toMatchObject({ path: "chats/Night Market/cast", before: "Ada Vale: onstage\nBo: onstage", after: "Ada Vale: onstage\nBo: offstage" });
+    expect(ws.list("chats/Night Market/blocks").find((e) => e.path.endsWith("Bo: Voice bank"))!.note).toContain("its card is offstage");
+    ws.revert(edit.id);
+    expect(store.chat(chat.id).offstage).toEqual([]);
+    expect(() => ws.write("chats/Night Market/cast", "Cy: offstage", ctx)).toThrow("isn't in Night Market's cast");
+    expect(() => ws.write("chats/Night Market/cast", "Bo: backstage", ctx)).toThrow("Name: onstage");
+    expect(() => ws.remove("chats/Night Market/cast", ctx)).toThrow();
+  });
+
+  test("the agent edits a chat's notes, logged and revertable; they can't be deleted", () => {
+    const { ws, ctx, store, chat } = world();
+    expect(ws.read("chats/Night Market/blocks/Right now").text).toBe("");
+    const edit = ws.write("chats/Night Market/blocks/Who knows what", "Bo knows about the wrist.", ctx);
+    expect(store.blocks(chat.id).find((b) => b.title === "Who knows what")!.content).toBe("Bo knows about the wrist.");
+    ws.revert(edit.id);
+    expect(store.blocks(chat.id).find((b) => b.title === "Who knows what")!.content).toBe("");
+    expect(() => ws.remove("chats/Night Market/blocks/Right now", ctx)).toThrow("keeps its notes");
+  });
+
   test("a card's default fields and messages can't be deleted", () => {
     const { ws, ctx } = world();
     expect(() => ws.remove("cards/Ada Vale/Description", ctx)).toThrow("always exist");

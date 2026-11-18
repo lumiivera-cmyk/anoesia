@@ -9,6 +9,7 @@ import { openDrawer, renderSide, wireSide } from "./side.js";
 import { applyBackground, applyMaterial, watchDialogs } from "./theme.js";
 import { openChat, showChatView, wireChat } from "./chat.js";
 import { showPrompts, wirePrompts } from "./prompts.js";
+import { wireScene } from "./scene.js";
 import { showCards, wireCards } from "./cards.js";
 import { showSettings, wireSettings } from "./settings.js";
 import { wireTextEditor } from "./editor.js";
@@ -53,6 +54,7 @@ async function start() {
   $("toast-close").innerHTML = icon.close(18);
   $("toast-close").addEventListener("click", () => showError(null));
   wireChat();
+  wireScene();
   wirePrompts();
   wireCards();
   wireSettings();

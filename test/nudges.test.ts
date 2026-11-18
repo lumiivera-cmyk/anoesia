@@ -38,7 +38,7 @@ describe("pace", () => {
 
 describe("nudge blocks in a prompt", () => {
   const message = (i: number, role: "user" | "assistant", content: string): Message => ({ id: `m${i}`, chatId: "c", role, author: role === "user" ? "user" : "narrator", content, swipes: [content], swipeIndex: 0, profileId: "", model: "", createdAt: "", editedAt: null });
-  const block = (id: string, extra: Partial<PromptBlock>): PromptBlock => ({ id, chatId: "c", kind: "text", cardId: null, fieldId: null, title: id, content: "", role: "system", enabled: true, depth: null, position: 0, ...extra });
+  const block = (id: string, extra: Partial<PromptBlock>): PromptBlock => ({ id, chatId: "c", kind: "text", cardId: null, fieldId: null, title: id, content: "", role: "system", enabled: true, depth: null, position: 0, offstage: false, ...extra });
   const blocks = [block("main", { kind: "main", content: "Main." }), block("pace", { ...NUDGES.pace!, depth: 0 }), block("restraint", { ...NUDGES.restraint! }), block("history", { kind: "history", role: "user" })];
 
   test("go right after your post, as you", () => {
