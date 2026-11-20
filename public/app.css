@@ -368,7 +368,6 @@ button.chip{border:0;font-family:inherit;color:var(--ink-1);cursor:pointer}
   .view-cards[data-mode="library"] .editor,.view-cards[data-mode="library"] .rail{display:none}
   .view-cards[data-mode="card"] .library{display:none}
   .view-cards[data-mode="card"] .head-buttons{display:none}
-  .view-cards[data-mode="library"] #cards-back{display:none!important}
   .card-head{gap:12px}
   .card-head .gem{width:52px!important;height:52px!important}
   .name-inp{font-size:var(--fs-xl);height:44px}

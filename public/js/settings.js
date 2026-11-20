@@ -683,7 +683,6 @@ function lookHtml() {
       <button type="button" class="choice raised mat press" ${choice(!sel)} data-material="lacquer"><span class="sw sw-lacquer" aria-hidden="true"></span>${chk}<span class="n">Lacquer</span><span class="d">warm and solid; retints to your photo</span></button>
       <button type="button" class="choice raised mat press" ${choice(sel)} data-material="selenite"><span class="sw sw-selenite" aria-hidden="true"></span>${chk}<span class="n">Selenite</span><span class="d">crystal plates that bend the photo behind them</span></button>
     </div>
-    ${sel ? `<p class="meta note">Selenite reaches Settings first. Chat, cards and prompts stay lacquer until theirs is ready.</p>` : ""}
     <div class="grouphead"><h3 class="eyebrow" id="photo-h">photo</h3><span class="meta">behind everything</span></div>
     <div class="photo-grid2" role="radiogroup" aria-labelledby="photo-h">
       ${

@@ -42,6 +42,10 @@ export function showCards(id) {
   }
   selected = id ?? (isPhone() ? null : (selected && cardById(selected) ? selected : state.cards[0]?.id ?? null));
   $("view-cards").dataset.mode = id ? "card" : "library";
+  // On a phone the library has no sidebar: its back button leads out to the chat.
+  const back = $("cards-back");
+  back.href = id ? "#/cards" : state.chatId ? `#/chat/${state.chatId}` : "#/";
+  back.setAttribute("aria-label", id ? "All cards" : "Back to the chat");
   render();
 }
 
