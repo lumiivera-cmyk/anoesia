@@ -29,9 +29,9 @@ export interface Config {
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const root = resolve(import.meta.dir, "..");
-  const keyFile = env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ?? "";
-  const project = env.GOOGLE_CLOUD_PROJECT?.trim() ?? "";
-  const location = env.GOOGLE_CLOUD_LOCATION?.trim() || "global";
+  const keyFile = envText(env.GOOGLE_APPLICATION_CREDENTIALS);
+  const project = envText(env.GOOGLE_CLOUD_PROJECT);
+  const location = vertexLocation(env.GOOGLE_CLOUD_LOCATION);
   const vertexReady = keyFile !== "" && project !== "";
   const port = Number(env.PORT ?? 4950);
   const timeout = Number(env.REQUEST_TIMEOUT_SECONDS ?? 180);
@@ -54,4 +54,26 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     hosted: env.ANOESIA_HOSTED === "1",
     requestTimeoutMs: (Number.isFinite(timeout) && timeout > 0 ? timeout : 180) * 1000,
   };
+}
+
+/**
+ * A `.env` value with spaces and stray quotes taken off the ends. Bun drops a
+ * matched pair of quotes itself, but a value copied from elsewhere can keep
+ * one, like `global"`, and that ends up inside the address.
+ */
+export function envText(value: string | undefined): string {
+  return (value ?? "").trim().replace(/^["'`]+|["'`]+$/g, "").trim();
+}
+
+/**
+ * GOOGLE_CLOUD_LOCATION, cleaned: "global" or a region such as
+ * `us-central1`. Anything else can't be part of an address, so it falls
+ * back to "global" with a warning in the log.
+ */
+export function vertexLocation(value: string | undefined): string {
+  const location = envText(value).toLowerCase();
+  if (location === "") return "global";
+  if (/^[a-z0-9]+(-[a-z0-9]+)*$/.test(location)) return location;
+  console.warn(`GOOGLE_CLOUD_LOCATION in .env isn't a location (${JSON.stringify(value)}); using "global". Set it to global or a region such as us-central1.`);
+  return "global";
 }
