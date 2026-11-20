@@ -239,8 +239,13 @@ button.chip{border:0;font-family:inherit;color:var(--ink-1);cursor:pointer}
 .snippet{padding:0 14px 12px 36px;margin-top:-6px;font-size:var(--fs-xs);line-height:18px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bbody{padding:0 14px 14px 40px;display:flex;flex-direction:column;gap:8px}
 .btext{border-radius:12px;padding:12px 14px;font-size:var(--fs-sm);line-height:24px;color:var(--ink-2);white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}
-.btext-edit{width:100%;box-sizing:border-box;min-height:160px;border:0;border-radius:12px;padding:12px 14px;font-size:var(--fs-sm);line-height:24px;color:var(--ink-2);resize:vertical}
-.inline-edit .well{border-radius:12px}
+.btext-edit{display:block;width:100%;box-sizing:border-box;min-height:96px;max-height:none;border:0;resize:none;overflow:hidden;field-sizing:content;font-family:inherit;cursor:text}
+.btext-edit:focus{outline-offset:2px}
+/* the macro bar shows under the block you're typing in */
+.bbody:not(.is-active)>.macbar{display:none}
+.bnote[hidden]{display:none}
+.save-state{white-space:nowrap}
+.bbody .well{border-radius:12px}
 .bnote{margin:0;display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);line-height:18px}
 .bnote.warn{color:var(--danger-ink)}
 .bactions{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}

@@ -11,10 +11,14 @@
  * left edge, the only drag handle. Drag it with a mouse or finger; or focus
  * it, press Space to pick up, arrows to move, Space to drop, Esc to cancel;
  * or tap it for the move menu.
+ *
+ * An open block's text is the editor: type in it and it saves itself a
+ * moment after you stop (or as soon as you leave the box). Anything else
+ * that changes blocks (role, switch, drag, the agent) saves typed text first.
  */
 
 import { $, api, approxTokens, attempt, cardById, escapeHtml, fmt, gem, isPhone, loadState, macroHtml, personaOf, state, timeLabel, tokChip } from "./core.js";
-import { macroBarHtml, openTextEditor, unknownNote, wireMacroBar } from "./editor.js";
+import { macroBarHtml, unknownNote, wireMacroBar } from "./editor.js";
 import { icon } from "./icons.js";
 import { closeOverlay, confirmDialog, openOverlay } from "./overlay.js";
 
@@ -22,8 +26,12 @@ let blocks = [];
 let preview = null;
 /** Open blocks and folders: block ids, and `folder:<cardId>`. */
 const open = new Set();
-/** The block being edited in place (wide screens). */
-let editing = null;
+/** Typed text not saved yet, by block id: { timer, dirty, saving }. */
+const pending = new Map();
+/** The block whose text was last focused: its macro bar shows. */
+let active = null;
+/** How long typing pauses before it saves. */
+const SAVE_AFTER = 800;
 let tab = "blocks";
 let pvView = "blocks";
 let pvAll = false;
@@ -32,7 +40,8 @@ const contexts = new Map();
 
 export async function showPrompts(startTab = "blocks") {
   tab = startTab;
-  editing = null;
+  await flushAll();
+  active = null;
   const loaded = await attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`));
   if (!loaded) return;
   blocks = loaded;
@@ -116,9 +125,19 @@ function render() {
   $("prompts-back").href = `#/chat/${chat.id}`;
   $("prompts-meta").textContent = isPhone() ? chat.name : `${chat.name} · send order for this chat · drag the bumps to reorder`;
   const list = units();
+  // Redrawing replaces the text boxes: keep the one being typed in focused, caret and all.
+  const was = document.activeElement?.closest?.("#block-list") ? document.activeElement : null;
+  const keep = was?.id && /^(text|title)-/.test(was.id) ? { id: was.id, start: was.selectionStart, end: was.selectionEnd, scroll: was.scrollTop } : null;
   $("block-list").innerHTML = list
     .map((u, i) => `<li data-unit="${u.key}" data-index="${i}">${u.type === "folder" ? folderHtml(u) : u.type === "history" ? historyHtml(u.blocks[0]) : blockHtml(u.blocks[0], { movedOut: u.movedOut && u.type === "block" })}</li>`)
     .join("");
+  for (const area of $("block-list").querySelectorAll("textarea[data-text-of]")) autosize(area);
+  const back = keep && document.getElementById(keep.id);
+  if (back) {
+    back.focus({ preventScroll: true });
+    back.setSelectionRange(keep.start, keep.end);
+    back.scrollTop = keep.scroll;
+  }
   renderMeter();
 }
 
@@ -154,7 +173,7 @@ function blockHtml(b, { movedOut = false, inFolder = false } = {}) {
   const src = sourceLine(b, movedOut);
   const snippet = inFolder && !isOpen && !isEmpty(b) ? `<div class="snippet">${escapeHtml(b.content.trim().split("\n")[0])}</div>` : "";
   const head = isPhone()
-    ? `<div class="l1">${blockIcon(b)}<button type="button" class="ptitle" data-edit="${b.id}"><span class="t">${escapeHtml(title)}</span><span class="src">${escapeHtml(src)} · tap to edit</span></button>${switchButton(b.id, b.enabled, name)}</div>
+    ? `<div class="l1">${blockIcon(b)}<button type="button" class="ptitle" data-toggle="${b.id}" aria-expanded="${isOpen}"><span class="t">${escapeHtml(title)}</span><span class="src">${escapeHtml(src)}</span></button>${switchButton(b.id, b.enabled, name)}</div>
        <div class="l2">${roleButton(b)}${tok}<span class="grow"></span>${chev(b.id, isOpen, name)}</div>`
     : `<div class="bhead">${blockIcon(b)}<button type="button" class="btitle" data-toggle="${b.id}" aria-expanded="${isOpen}"><span class="t">${escapeHtml(title)}</span><span class="src">${escapeHtml(src)}</span></button>
        ${roleButton(b)}${tok}${switchButton(b.id, b.enabled, name)}${chev(b.id, isOpen, name)}</div>`;
@@ -181,34 +200,25 @@ function folderHtml(u) {
   return `<div class="raised blk folder${isPhone() ? " prow" : ""}${on ? "" : " is-off"}" data-folder="${u.cardId}">${grip(key, `${name} folder`)}${head}${inner}</div>`;
 }
 
-/** The text of an open block: macros as chips, with a note for unknown ones, and its actions. */
+/** An open block: its text, editable right here, and its actions. */
 function bodyHtml(b) {
-  if (editing === b.id && !isPhone()) return editorHtml(b);
-  const { html } = macroHtml(b.content);
+  const id = `text-${b.id}`;
   const note = unknownNote(b.content);
   const placeLabel = b.depth === null ? "put it inside the chat history" : "take it out of the chat history";
-  return `<div class="bbody">
-    <div class="sunk btext" role="textbox" aria-readonly="true" aria-multiline="true" aria-label="${escapeHtml(blockName(b))} text" tabindex="0">${b.content.trim() ? html : `<span class="faint">Empty. ${b.kind === "field" ? "An empty field isn't sent." : "Nothing is sent until it has text."}</span>`}</div>
-    ${note ? `<p class="bnote warn" role="note">${icon.warn()}${escapeHtml(note)}</p>` : ""}
+  const empty = b.kind === "field" ? "Empty. An empty field isn't sent." : "Empty. Nothing is sent until it has text.";
+  const where = b.kind === "field" ? `edits the card in every chat${isHeld(b) ? " · sent again when the card is onstage" : ""}` : b.kind === "main" ? "edits the main prompt in every chat" : b.kind === "note" ? "this chat only · also one tap from the chat's scene menu" : "this chat only";
+  return `<div class="bbody${active === b.id ? " is-active" : ""}" data-body="${b.id}">
+    ${b.kind === "text" ? `<label class="sr" for="title-${b.id}">Block title</label><div class="sunk well"><input id="title-${b.id}" class="inp" data-title-of="${b.id}" value="${escapeHtml(b.title)}" autocomplete="off" /></div>` : ""}
+    <label class="sr" for="${id}">${escapeHtml(blockName(b))} text</label>
+    <textarea id="${id}" class="sunk btext btext-edit" data-text-of="${b.id}" placeholder="${escapeHtml(empty)}">${escapeHtml(b.content)}</textarea>
+    <p class="bnote warn" role="note" data-note-of="${b.id}"${note ? "" : " hidden"}>${icon.warn()}<span>${escapeHtml(note)}</span></p>
+    <div class="macbar sunk" role="group" aria-label="Insert a macro">${macroBarHtml(id)}</div>
     <div class="bactions">
-      <button type="button" class="btn raised press" data-edit="${b.id}">${icon.edit(16)} edit</button>
       <button type="button" class="btn ghost press" data-place="${b.id}">${placeLabel}</button>
       ${b.kind === "text" ? `<button type="button" class="btn btn-quiet-danger press" data-delete="${b.id}">${icon.trash(16)} delete block</button>` : ""}
-      <span class="meta src-note">${b.kind === "field" ? `edits the card in every chat${isHeld(b) ? " · sent again when the card is onstage" : ""}` : b.kind === "main" ? "edits the main prompt in every chat" : b.kind === "note" ? "this chat only · also one tap from the chat's scene menu" : ""}</span>
+      <span class="meta src-note">${where}</span><span class="grow"></span><span class="meta save-state" role="status" data-status-of="${b.id}"></span>
     </div>
   </div>`;
-}
-
-function editorHtml(b) {
-  const id = `edit-${b.id}`;
-  return `<form class="bbody inline-edit" data-save="${b.id}">
-    ${b.kind === "text" ? `<label class="sr" for="title-${b.id}">Block title</label><div class="sunk well"><input id="title-${b.id}" class="inp" value="${escapeHtml(b.title)}" autocomplete="off" /></div>` : ""}
-    <label class="sr" for="${id}">${escapeHtml(blockName(b))} text</label>
-    <textarea id="${id}" class="sunk btext-edit">${escapeHtml(b.content)}</textarea>
-    <div class="macbar sunk" role="group" aria-label="Insert a macro">${macroBarHtml(id)}</div>
-    <div class="bactions"><span class="meta">${b.kind === "field" ? "saves to the card, in every chat" : b.kind === "main" ? "saves the main prompt, shared by every chat" : "this chat only"}</span><span class="grow"></span>
-      <button type="button" class="btn ghost press" data-cancel-edit>cancel</button><button type="submit" class="btn btn-primary press">save</button></div>
-  </form>`;
 }
 
 function historyHtml(h) {
@@ -356,6 +366,7 @@ function renderPreview() {
 // --------------------------------------------------------------- changes
 
 async function patch(id, change) {
+  await flushAll();
   const saved = await attempt(() => api("PATCH", `/api/blocks/${id}`, change));
   if (!saved) return null;
   const i = blocks.findIndex((b) => b.id === id);
@@ -364,6 +375,7 @@ async function patch(id, change) {
 }
 
 async function saveOrder(ids, focusKey = null) {
+  await flushAll();
   const saved = await attempt(() => api("PUT", `/api/chats/${state.chatId}/blocks`, { ids }));
   if (saved) blocks = saved;
   render();
@@ -670,7 +682,6 @@ async function onClick(e) {
     const k = toggle.dataset.toggle;
     if (open.has(k)) open.delete(k);
     else open.add(k);
-    if (editing === k) editing = null;
     render();
     $("block-list").querySelector(`[data-toggle="${CSS.escape(k)}"].${toggle.classList[0]}`)?.focus();
     return;
@@ -709,20 +720,13 @@ async function onClick(e) {
     }
     return;
   }
-  const edit = t.closest("[data-edit]");
-  if (edit) return startEdit(edit.dataset.edit, edit);
-  if (t.closest("[data-cancel-edit]")) {
-    const id = editing;
-    editing = null;
-    render();
-    $("block-list").querySelector(`[data-edit="${id}"]`)?.focus();
-    return;
-  }
   const del = t.closest("[data-delete]");
   if (del) {
     const b = blocks.find((x) => x.id === del.dataset.delete);
     const ok = await confirmDialog({ title: `Delete ${b.title}?`, body: "It's this chat's own block, so it goes for good.", confirm: "delete block", keep: "keep it", opener: del });
     if (!ok) return;
+    clearTimeout(pending.get(b.id)?.timer);
+    pending.delete(b.id);
     if (await attempt(() => api("DELETE", `/api/blocks/${b.id}`))) {
       blocks = blocks.filter((x) => x.id !== b.id);
       render();
@@ -737,46 +741,125 @@ function afterChange(focusSelector) {
   refreshPreviewSoon();
 }
 
-function startEdit(id, opener) {
-  const b = blocks.find((x) => x.id === id);
-  if (isPhone()) {
-    const card = b.kind === "field" ? cardById(b.cardId) : null;
-    openTextEditor({
-      title: b.kind === "field" ? fieldTitle(b) : b.title,
-      sub: b.kind === "field" ? `${card?.name}'s card · in every chat` : b.kind === "main" ? "shared by every chat" : b.kind === "note" ? `this chat's note · ${NOTE_HINTS[b.title] ?? "this chat only"}` : "this chat's own",
-      text: b.content,
-      name: b.kind === "text" ? b.title : null,
-      label: `${blockName(b)} text`,
-      opener,
-      onSave: (text, title) => save(b, text, title),
-    });
-    return;
-  }
-  editing = id;
-  open.add(id);
-  render();
-  $(`edit-${id}`)?.focus();
+// ----------------------------------------------------------- typing, saving
+
+/** Grow a text box with its text, where the browser can't (field-sizing). */
+function autosize(area) {
+  if (CSS.supports?.("field-sizing", "content")) return;
+  area.style.height = "auto";
+  area.style.height = `${area.scrollHeight + 2}px`;
 }
 
-async function save(b, content, title) {
-  const change = { content };
-  if (b.kind === "text" && title !== null && title !== undefined && title.trim()) change.title = title;
-  const saved = await patch(b.id, change);
-  if (!saved) return false;
-  editing = null;
-  if (saved.kind !== "text" && saved.kind !== "note") await loadState();
+function onInput(e) {
+  const area = e.target.closest("[data-text-of]");
+  const title = e.target.closest("[data-title-of]");
+  if (!area && !title) return;
+  const id = area ? area.dataset.textOf : title.dataset.titleOf;
+  const b = blocks.find((x) => x.id === id);
+  if (!b) return;
+  if (area) {
+    b.content = area.value;
+    autosize(area);
+    const note = $("block-list").querySelector(`[data-note-of="${id}"]`);
+    const text = unknownNote(b.content);
+    if (note) {
+      note.hidden = !text;
+      note.querySelector("span").textContent = text;
+    }
+  } else {
+    b.title = title.value;
+  }
+  refreshChrome(b);
+  setStatus(id, "");
+  const p = pending.get(id) ?? { timer: 0, dirty: false, saving: null };
+  clearTimeout(p.timer);
+  p.dirty = true;
+  p.timer = setTimeout(() => saveText(id), SAVE_AFTER);
+  pending.set(id, p);
+}
+
+/** After typing: the block's token chip, source line and title, its folder's total, the meter. */
+function refreshChrome(b) {
+  const list = $("block-list");
+  const el = list.querySelector(`[data-block="${CSS.escape(b.id)}"]`);
+  if (!el) return;
+  const chip = el.querySelector(":scope > .bhead > .tok, :scope > .l2 > .tok, :scope > .slot > .tok");
+  if (chip) chip.outerHTML = tokChip(tokens(b), isEmpty(b) || isHeld(b));
+  const src = el.querySelector(":scope > .bhead .src, :scope > .l1 .src");
+  if (src) src.textContent = sourceLine(b, b.kind === "field" && !el.closest("[data-in]"));
+  if (b.kind === "text" && b.title.trim()) {
+    const t = el.querySelector(":scope > .bhead .t, :scope > .l1 .t, :scope > .slot .t");
+    if (t) t.textContent = b.title;
+  }
+  const folder = el.closest(".folder");
+  const run = folder && units().find((u) => u.type === "folder" && u.cardId === folder.dataset.folder);
+  const sum = folder?.querySelector(":scope > .bhead > .tok, :scope > .l2 > .tok");
+  if (run && sum) sum.outerHTML = tokChip(run.blocks.reduce((n, x) => n + tokens(x), 0));
+  renderMeter();
+}
+
+function setStatus(id, text) {
+  const s = $("block-list").querySelector(`[data-status-of="${CSS.escape(id)}"]`);
+  if (s) s.textContent = text;
+}
+
+/** Save a block's typed text (and a text block's title) now, if anything is unsaved. */
+async function saveText(id) {
+  const p = pending.get(id);
+  if (!p) return;
+  clearTimeout(p.timer);
+  while (p.saving) await p.saving;
+  if (!p.dirty) return;
+  p.dirty = false;
+  const b = blocks.find((x) => x.id === id);
+  if (!b) return pending.delete(id);
+  const change = { content: b.content };
+  if (b.kind === "text" && b.title.trim()) change.title = b.title.trim();
+  setStatus(id, "saving…");
+  p.saving = (async () => {
+    try {
+      const saved = await api("PATCH", `/api/blocks/${id}`, change);
+      // Keep anything typed while it saved; it saves next.
+      Object.assign(b, saved, { content: b.content, title: b.kind === "text" && !b.title.trim() ? saved.title : b.title });
+      setStatus(id, p.dirty ? "" : "saved");
+      if (saved.kind !== "text" && saved.kind !== "note") await loadState();
+      refreshPreviewSoon();
+    } catch (error) {
+      p.dirty = true;
+      setStatus(id, `not saved: ${error.message}`);
+    }
+  })();
+  await p.saving;
+  p.saving = null;
+  if (!p.dirty) pending.delete(id);
+}
+
+/** Save every block with typed text, before anything else changes blocks. */
+async function flushAll() {
+  await Promise.all([...pending.keys()].map(saveText));
+}
+
+/** Blocks may have changed elsewhere (the agent): save what's typed, then show them as they are now. */
+export async function reloadPrompts() {
+  if ($("view-prompts").hidden || !state.chatId) return;
+  await flushAll();
+  const loaded = await attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`));
+  if (!loaded) return;
+  blocks = loaded;
   render();
   refreshPreviewSoon();
-  $("block-list").querySelector(`[data-edit="${b.id}"]`)?.focus();
-  return true;
 }
 
-async function onSubmit(e) {
-  const form = e.target.closest("[data-save]");
-  if (!form) return;
-  e.preventDefault();
-  const b = blocks.find((x) => x.id === form.dataset.save);
-  await save(b, form.querySelector("textarea").value, form.querySelector("input")?.value ?? null);
+function onFocusIn(e) {
+  const box = e.target.closest("[data-text-of], [data-title-of]");
+  if (!box) return;
+  active = box.dataset.textOf ?? box.dataset.titleOf;
+  for (const body of $("block-list").querySelectorAll("[data-body]")) body.classList.toggle("is-active", body.dataset.body === active);
+}
+
+function onFocusOut(e) {
+  const box = e.target.closest("[data-text-of], [data-title-of]");
+  if (box) saveText(box.dataset.textOf ?? box.dataset.titleOf);
 }
 
 /** A ready-made nudge (src/nudges.ts): a block right after your post, as you. */
@@ -794,7 +877,10 @@ async function addBlock() {
   if (!block) return;
   blocks = await api("GET", `/api/chats/${state.chatId}/blocks`);
   open.add(block.id);
-  startEdit(block.id, $("add-block"));
+  render();
+  const title = $(`title-${block.id}`);
+  title?.focus();
+  title?.select();
 }
 
 // -------------------------------------------------------------------- tabs
@@ -813,7 +899,9 @@ export function wirePrompts() {
   for (const b of document.querySelectorAll("[data-nudge]")) b.addEventListener("click", () => addNudge(b.dataset.nudge, b));
   const list = $("block-list");
   list.addEventListener("click", onClick);
-  list.addEventListener("submit", onSubmit);
+  list.addEventListener("input", onInput);
+  list.addEventListener("focusin", onFocusIn);
+  list.addEventListener("focusout", onFocusOut);
   list.addEventListener("pointerdown", onPointerDown);
   list.addEventListener("pointermove", onPointerMove);
   list.addEventListener("pointerup", (e) => drag && e.pointerId === drag.id && endDrag(true));
@@ -822,12 +910,10 @@ export function wirePrompts() {
   list.addEventListener("keyup", (e) => {
     if (e.key === " " && e.target.closest(".bumps")) e.preventDefault();
   });
-  list.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && editing && e.target.closest("[data-save]")) {
-      const id = editing;
-      editing = null;
-      render();
-      list.querySelector(`[data-edit="${id}"]`)?.focus();
+  window.addEventListener("beforeunload", (e) => {
+    if ([...pending.values()].some((p) => p.dirty || p.saving)) {
+      flushAll();
+      e.preventDefault();
     }
   });
   document.addEventListener("keydown", (e) => {
