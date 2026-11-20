@@ -125,6 +125,20 @@ button.chip{border:0;font-family:inherit;color:var(--ink-1);cursor:pointer}
 .writing{display:flex;align-items:baseline;gap:10px}
 .writing .eyebrow{color:var(--ink-3)}
 .caret{color:var(--blue-ink);margin-left:2px}
+/* a reply's reasoning: a fold above the text, open while the model thinks, folded once the text starts */
+.thinking{margin:-2px 0 12px;color:var(--ink-4)}
+.thinking[hidden]{display:none}
+.thinking summary{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px 0 4px;margin-left:-4px;border-radius:10px;cursor:pointer;list-style:none;font-size:var(--fs-xs);line-height:16px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4)}
+.thinking summary::-webkit-details-marker{display:none}
+.thinking summary svg{flex:none;transition:transform .15s ease}
+.thinking[open] summary svg{transform:rotate(90deg)}
+.thinking summary:hover{color:var(--ink-3)}
+.thinking-body{margin:6px 0 2px 6px;padding:2px 4px 2px 14px;border-left:2px solid rgba(255,255,255,.16);max-height:min(22em,45vh);overflow:auto;overscroll-behavior:contain}
+.thinking-body .prose,.msgs .thinking-body .prose{font-size:var(--fs-sm);line-height:1.6;color:var(--ink-3)}
+.thinking-body .prose p{margin:0 0 10px}
+.thinking-body .scene-shift{margin:12px 0}
+.msg.live .msg-body:empty{display:none}
+@media (prefers-reduced-motion:reduce){.thinking summary svg{transition:none}}
 .msg-edit textarea{display:block;width:100%;box-sizing:border-box;min-height:120px;border:0;border-radius:14px;padding:12px 14px;font-size:var(--fs-lg);line-height:var(--lh-prose);color:var(--ink-2);resize:vertical}
 .edit-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
 .msg.editing .acts{display:none}
@@ -163,10 +177,11 @@ button.chip{border:0;font-family:inherit;color:var(--ink-1);cursor:pointer}
   .msgs-col{gap:22px}
   .msg.you{padding:12px 16px 14px}
   .msg-body .prose{line-height:1.62}
+  .thinking summary{min-height:44px}
   /* tap a message for its menu; the buttons stay for keyboards and screen readers and show when focused */
   .acts{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-  .msg:focus-within .acts{position:static;width:auto;height:auto;overflow:visible;clip-path:none}
-  .msg:focus-within .acts .act{width:44px;height:44px}
+  .msg .acts:focus-within{position:static;width:auto;height:auto;overflow:visible;clip-path:none}
+  .msg .acts:focus-within .act{width:44px;height:44px}
   .phone-row{display:flex;align-items:center;gap:6px;margin-top:12px}
   .phone-row .versions{margin-left:0}
   .phone-row .versions .ib,.phone-row .act-regen{width:44px;height:44px}

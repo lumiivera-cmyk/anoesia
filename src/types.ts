@@ -98,6 +98,8 @@ export interface Message {
   /** Every version of this message (regenerating adds one). */
   swipes: string[];
   swipeIndex: number;
+  /** The thinking model's reasoning behind the version shown ("" when there was none). Never sent to the model. */
+  reasoning: string;
   /** The profile and model that wrote the version shown ("" for yours). */
   profileId: string;
   model: string;

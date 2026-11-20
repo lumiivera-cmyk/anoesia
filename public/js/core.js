@@ -20,6 +20,8 @@ export const state = {
   chat: null,
   messages: [],
   busy: false,
+  /** The reply being written, as far as it has arrived: { reasoning, content }, or null. */
+  live: null,
   /** The last error from writing a reply, shown above the composer with "try again". */
   replyError: null,
 };

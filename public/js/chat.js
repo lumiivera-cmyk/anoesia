@@ -46,8 +46,11 @@ export async function openChat(id) {
     return;
   }
   const view = await attempt(() => api("GET", `/api/chats/${id}`));
-  if (view) applyView(view, false);
-  else {
+  if (view) {
+    applyView(view, false);
+    // A reply is being written (the page was reloaded, or you came back to this chat): watch it arrive.
+    if (view.busy) watchLive();
+  } else {
     state.chatId = null;
     state.chat = null;
     state.messages = [];
@@ -60,6 +63,7 @@ function applyView(view, draw = true) {
   state.chat = view.chat;
   state.messages = view.messages;
   state.busy = view.busy;
+  if (!view.busy) state.live = null;
   if (view.error) state.replyError = view.error;
   const i = state.chats.findIndex((c) => c.id === view.chat.id);
   if (i >= 0) state.chats[i] = view.chat;
@@ -138,7 +142,7 @@ function renderMessages(scrollToEnd) {
   }
   const lastReply = state.messages.at(-1)?.role === "assistant" ? state.messages.at(-1) : null;
   let html = state.messages.map((m) => messageHtml(m, m === lastReply)).join("");
-  if (state.busy) html += `<div class="writing" role="status"><span class="eyebrow">Narrator</span><span class="meta">writing<span class="caret" aria-hidden="true">▍</span></span></div>`;
+  if (state.busy) html += liveHtml();
   if (!html) {
     const castEmpty = !state.chat.cast.length;
     html = `<div class="empty raised"><p class="disp">Nothing here yet</p><p class="meta">${
@@ -146,7 +150,170 @@ function renderMessages(scrollToEnd) {
     }</p>${castEmpty ? `<button type="button" class="btn raised press" data-empty-cast>${icon.sliders(18)} chat settings</button>` : ""}</div>`;
   }
   box.innerHTML = html;
+  if (state.busy) drawLive();
   if (scrollToEnd || atEnd) scroller.scrollTop = scroller.scrollHeight;
+}
+
+// ------------------------------------------------------------ the live reply
+
+/**
+ * The reply being written, as it arrives: its reasoning in a fold that's
+ * open while the model thinks and folds away when the text starts (unless
+ * you opened or closed it yourself), then the text with a caret.
+ */
+function liveHtml() {
+  return `<article class="msg narrator live" aria-busy="true" aria-label="Narrator reply, being written">
+    <div class="mhead"><span class="eyebrow">Narrator</span><span class="meta" role="status" data-live-status></span></div>
+    <details class="thinking" data-live-thinking hidden${foldOpen ? " open" : ""}><summary>${icon.right(14)}<span data-live-thinking-label>thinking</span></summary><div class="thinking-body" data-live-reasoning></div></details>
+    <div class="msg-body" data-live-text></div>
+  </article>`;
+}
+
+/** Whether you've opened or closed the live fold yourself (then it stays as you left it), and whether it's open. */
+let foldTouched = false;
+let foldOpen = true;
+let drawQueued = false;
+
+/** Draw the live reply's words (at most once a frame). */
+function queueLive() {
+  if (drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(() => {
+    drawQueued = false;
+    const scroller = $("messages-scroll");
+    const atEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+    drawLive();
+    if (atEnd) scroller.scrollTop = scroller.scrollHeight;
+  });
+}
+
+function drawLive() {
+  const box = $("messages");
+  const fold = box.querySelector("[data-live-thinking]");
+  if (!fold) return;
+  const live = state.live ?? { reasoning: "", content: "" };
+  const caret = `<span class="caret" aria-hidden="true">▍</span>`;
+  const thinking = Boolean(live.reasoning) && !live.content;
+  box.querySelector("[data-live-status]").innerHTML = `${thinking ? "thinking" : "writing"}${live.content ? "" : caret}`;
+  if (live.reasoning) {
+    fold.hidden = false;
+    box.querySelector("[data-live-thinking-label]").textContent = live.content ? "reasoning" : "thinking";
+    const body = box.querySelector("[data-live-reasoning]");
+    const following = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    body.innerHTML = formatText(live.reasoning);
+    if (following) body.scrollTop = body.scrollHeight;
+    // The text has started: fold the thinking away, unless you've opened or closed it yourself.
+    if (live.content && fold.open && !foldTouched) fold.open = false;
+  }
+  if (live.content) {
+    const html = formatText(live.content);
+    const end = html.lastIndexOf("</p>");
+    box.querySelector("[data-live-text]").innerHTML = end >= 0 ? `${html.slice(0, end)}${caret}${html.slice(end)}` : html + caret;
+  } else {
+    box.querySelector("[data-live-text]").innerHTML = "";
+  }
+}
+
+/** Which reply this page is watching (one at a time), so a stream from a chat you've left is let go. */
+let watching = null;
+
+/**
+ * Follow a reply's events (see the server's `watch`) until it's done. If the
+ * connection drops before then (the phone slept, the network blinked) and the
+ * reply is still being written, watch it again from where it is.
+ */
+async function follow(chatId, open) {
+  watching?.abort();
+  const me = new AbortController();
+  watching = me;
+  const mine = () => watching === me && state.chatId === chatId;
+  let done = false;
+  for (let tries = 0; !done && tries < 6 && mine(); tries++) {
+    if (tries) await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** tries, 8000)));
+    if (!mine()) break;
+    let response;
+    try {
+      response = await (tries === 0 ? open(me.signal) : fetch(`api/chats/${chatId}/live`, { signal: me.signal }));
+    } catch {
+      continue;
+    }
+    if (!(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      // Refused (another reply is under way, or a check failed): the reason is in the JSON.
+      const data = await response.json().catch(() => null);
+      if (response.status === 401 && data?.login) location.href = "login";
+      if (mine()) state.replyError = data?.error ?? `The server answered ${response.status}.`;
+      break;
+    }
+    try {
+      done = await readEvents(response, (event) => {
+        if (!mine()) return;
+        onEvent(event);
+      });
+    } catch {
+      // dropped: try again
+    }
+  }
+  if (watching === me) watching = null;
+  if (!done && state.chatId === chatId) {
+    // Gave up watching, or was refused: show the chat as the server has it.
+    state.busy = false;
+    state.live = null;
+    await refresh();
+    renderChat();
+  }
+}
+
+/** Read server-sent events from a response, calling `each` with each one. Returns whether "done" arrived. */
+async function readEvents(response, each) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return false;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      if (!block.startsWith("data: ")) continue;
+      const event = JSON.parse(block.slice(6));
+      each(event);
+      if (event.type === "done") {
+        reader.cancel().catch(() => {});
+        return true;
+      }
+    }
+  }
+}
+
+function onEvent(event) {
+  if (event.type === "start") {
+    state.live = event.live ?? { reasoning: "", content: "" };
+    applyView(event, false);
+    renderChat();
+  } else if (event.type === "more") {
+    state.live ??= { reasoning: "", content: "" };
+    state.live.reasoning += event.reasoning ?? "";
+    state.live.content += event.content ?? "";
+    queueLive();
+  } else if (event.type === "reply") {
+    state.live = { reasoning: event.reasoning ?? "", content: event.content ?? "" };
+    queueLive();
+  } else if (event.type === "done") {
+    state.live = null;
+    state.replyError = event.error ?? null;
+    applyView(event, false);
+    renderChat();
+    loadState().then(renderSide, () => {});
+  }
+}
+
+/** Watch the reply that's being written in the open chat. */
+function watchLive() {
+  const chatId = state.chatId;
+  if (!chatId || watching) return;
+  state.live ??= { reasoning: "", content: "" };
+  follow(chatId, (signal) => fetch(`api/chats/${chatId}/live`, { signal }));
 }
 
 function versionsHtml(m) {
@@ -178,8 +345,10 @@ function messageHtml(m, isLastReply) {
     : `<div class="mhead"><span class="eyebrow">Narrator</span><span class="meta">${escapeHtml(meta)}</span>${acts}</div>`;
   // On a phone the last reply keeps its versions and regenerate under it; a tap on any message opens the rest.
   const phoneRow = !you && (isLastReply || versions) ? `<div class="phone-row">${versions}${regen}${isLastReply ? `<span class="meta">tap a message for more</span>` : ""}</div>` : "";
+  const thinking = !you && m.reasoning ? `<details class="thinking"><summary>${icon.right(14)}<span>reasoning</span></summary><div class="thinking-body">${formatText(m.reasoning)}</div></details>` : "";
   return `<article class="msg ${you ? "you sunk" : "narrator"}" data-id="${m.id}" aria-label="${escapeHtml(label)}">
     ${head}
+    ${thinking}
     <div class="msg-body">${formatText(m.content)}</div>
     ${phoneRow}
   </article>`;
@@ -188,8 +357,13 @@ function messageHtml(m, isLastReply) {
 async function onMessageClick(event) {
   if (event.target.closest("[data-empty-new]")) return newChat();
   if (event.target.closest("[data-empty-cast]")) return openChatSettings(event.target.closest("button"));
+  // Opening or reading the reasoning isn't a tap on the message.
+  if (event.target.closest(".thinking")) {
+    if (event.target.closest("[data-live-thinking] summary")) foldTouched = true;
+    return;
+  }
   const article = event.target.closest(".msg");
-  if (!article || article.classList.contains("editing")) return;
+  if (!article || article.classList.contains("editing") || article.classList.contains("live")) return;
   const m = state.messages.find((x) => x.id === article.dataset.id);
   if (!m) return;
   const button = event.target.closest("[data-act]");
@@ -229,7 +403,7 @@ async function act(what, m, article, opener) {
     if (view) await refresh();
     return;
   }
-  if (what === "regen") return run(() => api("POST", `/api/chats/${state.chatId}/regenerate`));
+  if (what === "regen") return run("regenerate");
 }
 
 function openMessageMenu(m, article) {
@@ -286,19 +460,19 @@ async function refresh() {
   await attempt(async () => applyView(await api("GET", `/api/chats/${state.chatId}`)));
 }
 
-/** Run a request that writes a reply, showing "writing" while it does. */
-async function run(request) {
+/** Write a reply (`send` after your message, or `regenerate`), showing it as it arrives. */
+async function run(what, body = {}) {
+  const chatId = state.chatId;
   state.busy = true;
+  state.live = { reasoning: "", content: "" };
   state.replyError = null;
+  foldTouched = false;
+  foldOpen = true;
   renderChat(true);
-  const view = await attempt(request);
-  state.busy = false;
-  if (view) applyView(view);
-  else await refresh();
-  if (view && !view.error) state.replyError = null;
-  renderChat();
-  await loadState();
-  renderSide();
+  await follow(chatId, (signal) =>
+    fetch(`api/chats/${chatId}/${what}?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal }),
+  );
+  if (state.chatId === chatId) renderChat();
 }
 
 // ------------------------------------------------------------------ composer
@@ -312,7 +486,7 @@ async function send(event) {
   autosize();
   // Show your message straight away, before the reply comes back.
   if (content.trim()) state.messages.push({ id: "pending", role: "user", content, swipes: [content], swipeIndex: 0, createdAt: new Date().toISOString(), editedAt: null, model: "" });
-  await run(() => api("POST", `/api/chats/${state.chatId}/send`, { content }));
+  await run("send", { content });
 }
 
 function autosize() {
@@ -447,14 +621,14 @@ export function wireChat() {
   document.addEventListener("anoesia:stage-changed", () => renderChat());
   $("composer").addEventListener("submit", send);
   $("continue").addEventListener("click", () => {
-    if (!state.busy && state.chatId) run(() => api("POST", `/api/chats/${state.chatId}/send`, { content: "" }));
+    if (!state.busy && state.chatId) run("send", { content: "" });
   });
   $("retry").addEventListener("click", () => {
     if (state.busy || !state.chatId) return;
     // A failed reply kept your message, so trying again lets the narrator answer it.
     const last = state.messages.at(-1);
-    if (last?.role === "assistant") run(() => api("POST", `/api/chats/${state.chatId}/regenerate`));
-    else run(() => api("POST", `/api/chats/${state.chatId}/send`, { content: "" }));
+    if (last?.role === "assistant") run("regenerate");
+    else run("send", { content: "" });
   });
   $("dismiss-error").addEventListener("click", () => {
     state.replyError = null;
@@ -469,6 +643,18 @@ export function wireChat() {
     }
   });
   $("stop").addEventListener("click", () => api("POST", `/api/chats/${state.chatId}/stop`).catch(() => {}));
+  // Back from another app with a reply under way: pick it up again if the connection was lost.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.busy && !watching) watchLive();
+  });
+  // toggle doesn't bubble: listen on the way down. Keeps the live fold as it was when the chat is redrawn.
+  $("messages").addEventListener(
+    "toggle",
+    (e) => {
+      if (e.target.matches?.("[data-live-thinking]")) foldOpen = e.target.open;
+    },
+    true,
+  );
   const guard = (fn) => (e) => {
     if (e.currentTarget.getAttribute("aria-disabled") === "true") {
       e.preventDefault();

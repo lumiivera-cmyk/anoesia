@@ -10,7 +10,7 @@ import { loadConfig, type Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
 import { addressOf, cookieFor, isPublicPath, Login, overHttps, tokenOf } from "./login.ts";
-import { ApiError, CancelledError, createChatCompletion, listModels, type ApiOptions } from "./nanogpt.ts";
+import { ApiError, CancelledError, createChatCompletion, listModels, streamChatCompletion, type ApiOptions, type LiveReply } from "./nanogpt.ts";
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { NUDGES } from "./nudges.ts";
@@ -44,41 +44,169 @@ export function createApp(config: Config): App {
   const api: ApiOptions = { apiKey: config.apiKey, baseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs, vertex: config.vertex };
   // Keys saved in Settings override .env's, and every request reports how the provider answered.
   const providers = new Providers(config, api);
-  /** The reply being written in each chat, so Stop can end it and a second one can't start. */
-  const running = new Map<string, AbortController>();
+  /** The reply being written in each chat, so Stop can end it, a second one can't start, and the page can watch it arrive. */
+  const running = new Map<string, Live>();
 
-  /** Ask the RP profile for the next reply in a chat, from `history` (default: its messages as they are now). */
-  async function generate(chatId: string, history?: Message[]): Promise<{ content: string; profileId: string; model: string }> {
+  /**
+   * Start writing a reply in a chat: after your message (`text`, saved first
+   * when there is one), or as a new version of the last reply
+   * (`regenerate`). Checks that it can start (throws `ValidationError` if
+   * not), then writes in the background: the reply is saved when it's done,
+   * whether or not anyone is still watching, and `finished` says how it went.
+   */
+  function startReply(chatId: string, mode: { regenerate: true } | { regenerate: false; text: string }): Live {
+    store.chat(chatId);
+    if (running.has(chatId)) throw new ValidationError("A reply is already being written in this chat.");
+    let history: Message[] | undefined;
+    let last: Message | undefined;
+    if (mode.regenerate) {
+      const messages = store.messages(chatId);
+      last = messages.at(-1);
+      if (!last || last.role !== "assistant") throw new ValidationError("There's no reply at the end of the chat to regenerate.");
+      // Written from everything before the last reply, then added to it as a new version.
+      history = messages.slice(0, -1);
+    } else if (mode.text) {
+      store.addMessage({ chatId, role: "user", author: "user", content: mode.text });
+    }
+    const live: Live = { controller: new AbortController(), reply: { reasoning: "", content: "" }, watchers: new Set(), finished: Promise.resolve({}) };
+    running.set(chatId, live);
+    live.finished = (async () => {
+      let outcome: { error?: string } = {};
+      try {
+        const reply = await generate(chatId, live, history);
+        if (last) store.addSwipe(last.id, reply.content, reply.profileId, reply.model, reply.reasoning);
+        else store.addMessage({ chatId, role: "assistant", author: "narrator", ...reply });
+      } catch (error) {
+        if (!(error instanceof ApiError || error instanceof ValidationError || error instanceof CancelledError)) console.error(error);
+        outcome = { error: errorMessage(error) };
+      } finally {
+        running.delete(chatId);
+      }
+      tell(live, { type: "done", ...chatView(chatId), ...outcome });
+      return outcome;
+    })();
+    return live;
+  }
+
+  /**
+   * Ask the RP profile for the next reply in a chat, from `history` (default:
+   * its messages as they are now), streamed into `live`. Stopped partway, it
+   * keeps what was written (if anything was).
+   */
+  async function generate(chatId: string, live: Live, history?: Message[]): Promise<{ content: string; reasoning: string; profileId: string; model: string }> {
     const settings = store.settings();
     if (!settings.rpProfileId) throw new ValidationError("Pick a connection profile first (Settings → Connections).");
     const profile = store.profile(settings.rpProfileId);
     if (!profile.model) throw new ValidationError(`The profile "${profile.name}" has no model yet.`);
-    if (running.has(chatId)) throw new ValidationError("A reply is already being written in this chat.");
     const prompt = buildPrompt(chatId, history);
-    const controller = new AbortController();
-    running.set(chatId, controller);
+    let content: string;
+    let reasoning: string;
+    let model = profile.model;
     try {
-      const result = await createChatCompletion(api, {
-        model: profile.model,
-        provider: profile.provider,
-        messages: prompt.messages,
-        temperature: profile.temperature,
-        maxTokens: profile.maxTokens,
-        topP: profile.topP,
-        minP: profile.minP,
-        reasoningEffort: profile.reasoningEffort,
-        extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Json) : undefined,
-        signal: controller.signal,
-      });
-      const content = cleanReply(result.content);
-      if (!content) throw new ApiError("The model returned an empty reply.");
-      // The prompt was really sent: keep what its macros did to the variables.
-      store.saveVars(chatId, prompt.vars);
-      store.saveVars("global", prompt.globals);
-      return { content, profileId: profile.id, model: result.model };
-    } finally {
-      running.delete(chatId);
+      const result = await streamChatCompletion(
+        api,
+        {
+          model: profile.model,
+          provider: profile.provider,
+          messages: prompt.messages,
+          temperature: profile.temperature,
+          maxTokens: profile.maxTokens,
+          topP: profile.topP,
+          minP: profile.minP,
+          reasoningEffort: profile.reasoningEffort,
+          extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Json) : undefined,
+          signal: live.controller.signal,
+        },
+        (next) => update(live, next),
+      );
+      content = cleanReply(result.content);
+      reasoning = result.reasoning;
+      model = result.model;
+    } catch (error) {
+      // Stopped: keep the words that had arrived, like a reply that ended there.
+      if (!(error instanceof CancelledError) || !cleanReply(error.partial.content)) throw error;
+      content = cleanReply(error.partial.content);
+      reasoning = error.partial.reasoning;
     }
+    if (!content) throw new ApiError("The model returned an empty reply.");
+    // The prompt was really sent: keep what its macros did to the variables.
+    store.saveVars(chatId, prompt.vars);
+    store.saveVars("global", prompt.globals);
+    return { content, reasoning, profileId: profile.id, model };
+  }
+
+  /** Tell everyone watching a reply what's new: the added words, or the whole reply when it changed shape (a `<think>` tag closed). */
+  function update(live: Live, next: LiveReply): void {
+    const before = live.reply;
+    live.reply = next;
+    if (next.reasoning.startsWith(before.reasoning) && next.content.startsWith(before.content)) {
+      const reasoning = next.reasoning.slice(before.reasoning.length);
+      const content = next.content.slice(before.content.length);
+      if (reasoning || content) tell(live, { type: "more", reasoning, content });
+    } else {
+      tell(live, { type: "reply", ...next });
+    }
+  }
+
+  function tell(live: Live, event: Json): void {
+    for (const watcher of live.watchers) watcher(event);
+  }
+
+  /**
+   * A reply arriving, as server-sent events: "start" (the chat as it is now,
+   * and the reply so far), then "more" (words added to the reasoning or the
+   * text) or "reply" (the whole reply again), then "done" (the chat with the
+   * reply saved, and `error` if it failed). With no reply being written,
+   * just "done". Leaving early doesn't stop the reply; Stop does.
+   */
+  function watch(chatId: string, live: Live | undefined): Response {
+    const encoder = new TextEncoder();
+    let stopWatching = () => {};
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (event: Json) => {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          } catch {
+            stopWatching();
+          }
+        };
+        if (!live) {
+          send({ type: "done", ...chatView(chatId) });
+          controller.close();
+          return;
+        }
+        // A comment now and then, so nothing between here and the browser gives up on a quiet model.
+        const beat = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": still here\n\n"));
+          } catch {
+            stopWatching();
+          }
+        }, 15000);
+        const watcher = (event: Json) => {
+          send(event);
+          if (event.type === "done") {
+            stopWatching();
+            try {
+              controller.close();
+            } catch {
+              // already gone
+            }
+          }
+        };
+        stopWatching = () => {
+          clearInterval(beat);
+          live.watchers.delete(watcher);
+        };
+        live.watchers.add(watcher);
+        send({ type: "start", ...chatView(chatId), live: live.reply });
+      },
+      cancel() {
+        stopWatching();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" } });
   }
 
   /** Send a profile one tiny request: does it answer, and how fast. A failure is a result here, not an error. */
@@ -126,6 +254,12 @@ export function createApp(config: Config): App {
 
   function chatView(chatId: string) {
     return { chat: store.chat(chatId), messages: store.messages(chatId), busy: running.has(chatId) };
+  }
+
+  /** A reply's answer to a plain (not streamed) request: the chat once the reply is saved, or with the error. */
+  async function settled(chatId: string, live: Live): Promise<Response> {
+    const outcome = await live.finished;
+    return json({ ...chatView(chatId), ...outcome });
   }
 
   async function route(request: Request, url: URL): Promise<Response> {
@@ -246,39 +380,27 @@ export function createApp(config: Config): App {
       if (method === "PATCH") return json(store.updateBlock(p[0]!, await body()));
       if (method === "DELETE") return (store.deleteBlock(p[0]!), json({ ok: true }));
     }
-    // Send: save your message (if any), then write the reply.
+    // Send: save your message (if any), then write the reply. With ?stream=1 the reply
+    // arrives as it's written (see `watch`); without, the answer waits for it.
     if ((p = m("/api/chats/:id/send")) && method === "POST") {
       const chatId = p[0]!;
       const b = await body();
-      const text = typeof b.content === "string" ? b.content.trim() : "";
-      store.chat(chatId);
-      if (running.has(chatId)) throw new ValidationError("A reply is already being written in this chat.");
-      if (text) store.addMessage({ chatId, role: "user", author: "user", content: text });
-      try {
-        const reply = await generate(chatId);
-        store.addMessage({ chatId, role: "assistant", author: "narrator", ...reply });
-      } catch (error) {
-        return json({ ...chatView(chatId), error: errorMessage(error) });
-      }
-      return json(chatView(chatId));
+      const live = startReply(chatId, { regenerate: false, text: typeof b.content === "string" ? b.content.trim() : "" });
+      return url.searchParams.get("stream") === "1" ? watch(chatId, live) : settled(chatId, live);
     }
     // Regenerate: a new version of the last reply, written from everything before it.
     if ((p = m("/api/chats/:id/regenerate")) && method === "POST") {
       const chatId = p[0]!;
-      const messages = store.messages(chatId);
-      const last = messages.at(-1);
-      if (!last || last.role !== "assistant") throw new ValidationError("There's no reply at the end of the chat to regenerate.");
-      // Generate from everything before the last reply, then add the result to it as a new version.
-      try {
-        const reply = await generate(chatId, messages.slice(0, -1));
-        store.addSwipe(last.id, reply.content, reply.profileId, reply.model);
-      } catch (error) {
-        return json({ ...chatView(chatId), error: errorMessage(error) });
-      }
-      return json(chatView(chatId));
+      const live = startReply(chatId, { regenerate: true });
+      return url.searchParams.get("stream") === "1" ? watch(chatId, live) : settled(chatId, live);
+    }
+    // Watch the reply being written (after the page was reloaded, or the phone slept).
+    if ((p = m("/api/chats/:id/live")) && method === "GET") {
+      store.chat(p[0]!);
+      return watch(p[0]!, running.get(p[0]!));
     }
     if ((p = m("/api/chats/:id/stop")) && method === "POST") {
-      running.get(p[0]!)?.abort();
+      running.get(p[0]!)?.controller.abort();
       return json({ ok: true });
     }
 
@@ -410,6 +532,14 @@ export function createApp(config: Config): App {
   }
 
   return { fetch, store, agent, close: () => db.close() };
+}
+
+/** A reply being written: its stop switch, what it has written so far, who's watching, and how it ended. */
+interface Live {
+  controller: AbortController;
+  reply: LiveReply;
+  watchers: Set<(event: Json) => void>;
+  finished: Promise<{ error?: string }>;
 }
 
 function providerId(raw: string): ProviderId {

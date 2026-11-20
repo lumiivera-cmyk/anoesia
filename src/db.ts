@@ -204,6 +204,13 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE prompt_blocks_v7 RENAME TO prompt_blocks;
   CREATE INDEX prompt_blocks_chat ON prompt_blocks(chat_id, position);
   `,
+
+  // 8: a reply's reasoning. A thinking model's reasoning for each version,
+  // a JSON array beside swipes ("" where there was none). Kept to read, never
+  // sent back to the model.
+  `
+  ALTER TABLE messages ADD COLUMN reasonings TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

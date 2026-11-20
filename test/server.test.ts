@@ -464,3 +464,137 @@ test("nudges: adding one makes a block right after your post, as you", async () 
   const sent = received.at(-1)!.messages;
   expect(sent.at(-1)!.content).toContain("My post was about 4 words, in one paragraph");
 });
+
+describe("streaming a reply", () => {
+  /** A stand-in model that streams `chunks` (each a delta, or an error object), waiting `gapMs` between them. */
+  function streams(chunks: Record<string, unknown>[], gapMs = 0) {
+    fake.reload({
+      async fetch(request) {
+        const body = (await request.json()) as (typeof received)[number] & { stream?: boolean };
+        received.push(body);
+        const encoder = new TextEncoder();
+        return new Response(
+          new ReadableStream({
+            async start(controller) {
+              try {
+                for (const c of chunks) {
+                  if (gapMs) await Bun.sleep(gapMs);
+                  const event = "error" in c ? c : { model: "test/model-v2", choices: [{ delta: c, finish_reason: null }] };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                }
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                controller.close();
+              } catch {
+                // the app hung up (Stop)
+              }
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      },
+    });
+  }
+
+  /** Read a stream of the app's events to the end. */
+  async function events(response: Response) {
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const text = await response.text();
+    return text
+      .split("\n\n")
+      .filter((block) => block.startsWith("data: "))
+      .map((block) => JSON.parse(block.slice(6)));
+  }
+
+  test("reasoning and text arrive as they're written, and the reply keeps its reasoning", async () => {
+    const { chat } = await setUp();
+    streams([{ reasoning: "She is tired; " }, { reasoning: "keep it short." }, { content: "Ada " }, { content: "looks up." }]);
+    const response = await app.fetch(
+      new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "Hi." }) }),
+    );
+    const all = await events(response);
+    expect(received.at(-1)).toMatchObject({ stream: true });
+    expect(all[0]).toMatchObject({ type: "start", busy: true, live: { reasoning: "", content: "" } });
+    expect(all[0].messages.at(-1)).toMatchObject({ role: "user", content: "Hi." });
+    const more = all.filter((e) => e.type === "more");
+    expect(more.map((e) => e.reasoning).join("")).toBe("She is tired; keep it short.");
+    expect(more.map((e) => e.content).join("")).toBe("Ada looks up.");
+    const done = all.at(-1);
+    expect(done).toMatchObject({ type: "done", busy: false });
+    expect(done.error).toBeUndefined();
+    expect(done.messages.at(-1)).toMatchObject({ role: "assistant", content: "Ada looks up.", reasoning: "She is tired; keep it short.", model: "test/model-v2" });
+    // A new version keeps its own reasoning; the first version keeps the first's.
+    streams([{ content: "<think>Try again.</think>Ada nods." }]);
+    const regen = await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/regenerate?stream=1`, { method: "POST" })));
+    const last = regen.at(-1).messages.at(-1);
+    expect(last).toMatchObject({ content: "Ada nods.", reasoning: "Try again.", swipeIndex: 1 });
+    const first = (await call("PATCH", `/api/messages/${last.id}`, { swipeIndex: 0 })).data;
+    expect(first).toMatchObject({ content: "Ada looks up.", reasoning: "She is tired; keep it short." });
+  });
+
+  test("<think> tags split live: reasoning first, then the text", async () => {
+    const { chat } = await setUp();
+    streams([{ content: "<thi" }, { content: "nk>Plan" }, { content: " it.</th" }, { content: "ink>Hello" }]);
+    const all = await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" })));
+    // The text never shows a tag, even half of one.
+    for (const e of all.filter((x) => x.type === "more" || x.type === "reply")) expect(e.content ?? "").not.toContain("<");
+    expect(all.at(-1).messages.at(-1)).toMatchObject({ content: "Hello", reasoning: "Plan it." });
+  });
+
+  test("Stop keeps the words that had arrived", async () => {
+    const { chat } = await setUp();
+    streams([{ content: "Ada starts " }, { content: "to answer" }, { content: " and goes on" }, { content: " and on." }], 60);
+    const response = await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" }));
+    setTimeout(() => void call("POST", `/api/chats/${chat.id}/stop`), 150);
+    const all = await events(response);
+    const done = all.at(-1);
+    // Kept like a reply that ended there: no error to show.
+    expect(done.error).toBeUndefined();
+    expect(done.messages.at(-1)).toMatchObject({ role: "assistant", content: "Ada starts to answer" });
+  });
+
+  test("Stop before any words saves nothing", async () => {
+    const { chat } = await setUp();
+    streams([{ reasoning: "Hm." }, { content: "Late." }], 200);
+    const response = await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: JSON.stringify({ content: "Hi." }) }));
+    setTimeout(() => void call("POST", `/api/chats/${chat.id}/stop`), 50);
+    const done = (await events(response)).at(-1);
+    expect(done.error).toBe("Stopped.");
+    expect(done.messages.at(-1)).toMatchObject({ role: "user", content: "Hi." });
+  });
+
+  test("an error partway: the reply isn't saved, and the error says what happened", async () => {
+    const { chat } = await setUp();
+    streams([{ content: "Ada be" }, { error: { message: "overloaded" } }]);
+    const done = (await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: JSON.stringify({ content: "Hi." }) })))).at(-1);
+    expect(done.error).toContain("overloaded");
+    expect(done.messages.at(-1)).toMatchObject({ role: "user" });
+    // and a second reply can start
+    streams([{ content: "Ada smiles." }]);
+    const again = (await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" })))).at(-1);
+    expect(again.messages.at(-1)).toMatchObject({ content: "Ada smiles." });
+  });
+
+  test("watching later: the reply so far, then the rest; nothing to watch says done", async () => {
+    const { chat } = await setUp();
+    const idle = await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/live`)));
+    expect(idle).toEqual([expect.objectContaining({ type: "done", busy: false })]);
+    streams([{ content: "One, " }, { content: "two, " }, { content: "three." }], 60);
+    const first = await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" }));
+    await Bun.sleep(100);
+    const later = await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/live`)));
+    expect(later[0]).toMatchObject({ type: "start", busy: true });
+    expect(later[0].live.content).toStartWith("One,");
+    expect(later[0].live.content + later.filter((e) => e.type === "more").map((e) => e.content).join("")).toBe("One, two, three.");
+    expect(later.at(-1).messages.at(-1)).toMatchObject({ content: "One, two, three." });
+    await first.text();
+  });
+
+  test("a second reply can't start while one is being written", async () => {
+    const { chat } = await setUp();
+    streams([{ content: "Slow." }], 150);
+    const first = app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" }));
+    await Bun.sleep(20);
+    expect((await call("POST", `/api/chats/${chat.id}/send?stream=1`, {})).status).toBe(400);
+    await (await first).text();
+  });
+});
