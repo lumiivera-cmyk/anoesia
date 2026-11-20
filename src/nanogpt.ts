@@ -163,9 +163,15 @@ export class ApiError extends Error {
 
 /** Thrown when a request was stopped on purpose, through its `signal`. */
 export class CancelledError extends Error {
-  constructor() {
+  /**
+   * What a streamed reply had written before it was stopped (both "" when
+   * nothing had arrived, or the request wasn't streamed).
+   */
+  readonly partial: { content: string; reasoning: string };
+  constructor(partial: { content: string; reasoning: string } = { content: "", reasoning: "" }) {
     super("The reply was stopped.");
     this.name = "CancelledError";
+    this.partial = partial;
   }
 }
 
@@ -184,7 +190,6 @@ export async function createChatCompletion(
   if (target.provider === "vertex" && !isGeminiModel(request.model)) {
     throw new ApiError("Only Gemini models can be used through Google Vertex AI. Pick a Gemini model for this profile.");
   }
-  const name = providerName(target);
 
   // The request body. Note the API uses snake_case (`max_tokens`), while
   // our own code uses camelCase (`maxTokens`).
@@ -200,6 +205,12 @@ export async function createChatCompletion(
   }
   target.onResult?.(provider, { ok: true, ms: Date.now() - started });
 
+  return readCompletion(json, target, request);
+}
+
+/** A whole (not streamed) reply's text, tool calls and reasoning, every shape checked. */
+function readCompletion(json: unknown, target: ApiOptions, request: CompletionRequest): CompletionResult {
+  const name = providerName(target);
   // Dig the text out of the response. Everything is checked because a model
   // provider having a bad day can return all sorts of shapes.
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
@@ -239,6 +250,257 @@ export async function createChatCompletion(
   };
 }
 
+/** A streamed reply as it stands so far: its reasoning and its text, `<think>` tags already sorted out. */
+export interface LiveReply {
+  reasoning: string;
+  content: string;
+}
+
+/**
+ * Ask the model for one reply, streamed: `onUpdate` is told the reply so
+ * far (reasoning and text) each time more of it arrives, and the whole
+ * reply is returned at the end, read the same way as `createChatCompletion`.
+ *
+ * A provider that answers with a plain JSON reply instead of a stream is
+ * read as one, so nothing breaks when a model can't stream. For Vertex AI
+ * the request asks Gemini for its thought summaries (`include_thoughts`),
+ * unless the profile's extra parameters already decide that; if Google
+ * refuses the field, it asks once more without it.
+ *
+ * The timeout is a quiet limit here: it's how long the model may go without
+ * sending anything (a long reply that keeps coming isn't cut off).
+ *
+ * Throws like `createChatCompletion`. A stop through `request.signal`
+ * throws `CancelledError` carrying what had arrived (`partial`).
+ */
+export async function streamChatCompletion(
+  options: ApiOptions,
+  request: CompletionRequest,
+  onUpdate: (live: LiveReply) => void,
+): Promise<CompletionResult> {
+  const target = optionsFor(options, request.provider);
+  if (target.provider === "vertex" && !isGeminiModel(request.model)) {
+    throw new ApiError("Only Gemini models can be used through Google Vertex AI. Pick a Gemini model for this profile.");
+  }
+  const provider = target.provider ?? "nanogpt";
+  const started = Date.now();
+  const fail = (error: unknown) => {
+    if (error instanceof ApiError) target.onResult?.(provider, { ok: false, ms: null, status: error.status ?? null, message: error.message });
+    return error;
+  };
+
+  const plain = { ...requestBody(request), stream: true };
+  const withThoughts = target.provider === "vertex" ? askForThoughts(plain, request) : null;
+  let response: Response;
+  let idle: Idle;
+  try {
+    ({ response, idle } = await openStream(target, withThoughts ?? plain, request.signal));
+    // Google refusing the thoughts field: ask again without it.
+    if (withThoughts && response.status === 400) {
+      const text = await response.text();
+      if (/include_thoughts|thinking_config|extra_body/i.test(text)) {
+        idle.done();
+        ({ response, idle } = await openStream(target, plain, request.signal));
+      } else {
+        idle.done();
+        throw new ApiError(clean(target, describeHttpError(400, text, target)), 400);
+      }
+    }
+  } catch (error) {
+    throw fail(error);
+  }
+
+  try {
+    if (!response.ok) {
+      const text = await idle.read(response.text());
+      throw new ApiError(clean(target, describeHttpError(response.status, text, target)), response.status);
+    }
+    // Not a stream after all: a whole reply.
+    if (!(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const text = await idle.read(response.text());
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new ApiError(`${providerName(target)} sent back something that isn't JSON.`, response.status);
+      }
+      const result = readCompletion(json, target, request);
+      onUpdate({ reasoning: result.reasoning, content: result.content });
+      target.onResult?.(provider, { ok: true, ms: Date.now() - started });
+      return result;
+    }
+
+    const acc = { raw: "", fieldReasoning: "", model: "", finishReason: null as string | null };
+    const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finished = false;
+    try {
+      while (!finished) {
+        const { value, done } = await idle.read(reader.read());
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
+        let changed = false;
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (data === "[DONE]") {
+            finished = true;
+            break;
+          }
+          if (readChunk(data, acc, target)) changed = true;
+        }
+        if (changed) onUpdate(live());
+      }
+    } catch (error) {
+      if (error instanceof CancelledError) throw new CancelledError(live());
+      throw error;
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+
+    const final = live();
+    if (!final.content && !request.allowEmpty) {
+      throw new ApiError(
+        acc.finishReason === "length"
+          ? "The model ran out of tokens before writing anything. Try raising Max tokens."
+          : "The model returned an empty reply.",
+      );
+    }
+    target.onResult?.(provider, { ok: true, ms: Date.now() - started });
+    return { content: final.content, toolCalls: [], model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning };
+  } catch (error) {
+    throw fail(error);
+  } finally {
+    idle.done();
+  }
+}
+
+/**
+ * Vertex AI's body with Gemini asked for its thought summaries
+ * (`extra_body.google.thinking_config.include_thoughts`), or null when
+ * that isn't wanted: thinking is off, or the profile's extra parameters
+ * already say whether to include thoughts.
+ */
+export function askForThoughts(body: Record<string, unknown>, request: CompletionRequest): Record<string, unknown> | null {
+  if (request.reasoningEffort === "none") return null;
+  const extra = isRecord(body.extra_body) ? body.extra_body : {};
+  const google = isRecord(extra.google) ? extra.google : {};
+  const thinking = isRecord(google.thinking_config) ? google.thinking_config : {};
+  if ("include_thoughts" in thinking) return null;
+  return { ...body, extra_body: { ...extra, google: { ...google, thinking_config: { ...thinking, include_thoughts: true } } } };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Read one streamed chunk into `acc`. Returns whether the reply changed. */
+function readChunk(data: string, acc: { raw: string; fieldReasoning: string; model: string; finishReason: string | null }, target: ApiOptions): boolean {
+  let json: unknown;
+  try {
+    json = JSON.parse(data);
+  } catch {
+    return false; // a keep-alive or a broken line: skip it
+  }
+  if (!isRecord(json)) return false;
+  const error = json.error as { message?: unknown } | string | undefined;
+  if (error) {
+    const detail = typeof error === "string" ? error : typeof error.message === "string" ? error.message : "";
+    throw new ApiError(clean(target, `${providerName(target)} stopped with an error${detail ? ` (${detail})` : "."}`));
+  }
+  if (typeof json.model === "string" && json.model) acc.model = json.model;
+  const choice = (Array.isArray(json.choices) ? json.choices[0] : undefined) as
+    | { delta?: { content?: unknown; extra_content?: { google?: { thought?: unknown } } } & ReasoningFields; finish_reason?: unknown }
+    | undefined;
+  if (typeof choice?.finish_reason === "string") acc.finishReason = choice.finish_reason;
+  const delta = choice?.delta;
+  if (!delta) return false;
+  const before = acc.raw.length + acc.fieldReasoning.length;
+  const thought = delta.extra_content?.google?.thought === true;
+  const field = [delta.reasoning, delta.reasoning_content].find((v) => typeof v === "string" && v !== "");
+  if (typeof field === "string") acc.fieldReasoning += field;
+  else if (Array.isArray(delta.reasoning_details)) {
+    for (const d of delta.reasoning_details) {
+      const t = (d as { text?: unknown })?.text ?? (d as { summary?: unknown })?.summary;
+      if (typeof t === "string") acc.fieldReasoning += t;
+    }
+  }
+  if (typeof delta.content === "string") {
+    if (thought) acc.fieldReasoning += delta.content;
+    else acc.raw += delta.content;
+  }
+  return acc.raw.length + acc.fieldReasoning.length !== before;
+}
+
+/**
+ * The reply so far, from the text that has arrived (which may hold
+ * `<think>`/`<thought>` reasoning) and the reasoning sent apart from it. A
+ * tag half arrived at the very end is held back, so it never flashes up as
+ * text.
+ */
+export function liveReply(raw: string, fieldReasoning: string): LiveReply {
+  const parts = thinkParts(raw.replace(/<\/?(t(h(i(n(k)?)?|o(u(g(h(t)?)?)?)?)?)?)?$/i, ""));
+  const reasoning = fieldReasoning.trim() ? fieldReasoning.trim() : parts.reasoning.join("\n\n");
+  return { reasoning, content: parts.rest };
+}
+
+/** Stops a streamed request when it goes quiet for too long. */
+interface Idle {
+  /** Wait for `step`, failing with the right error if the request is stopped or goes quiet. */
+  read<T>(step: Promise<T>): Promise<T>;
+  /** Stop the clock. */
+  done(): void;
+}
+
+/** POST a streamed request; returns the response once its headers arrive, and the quiet clock that keeps watching it. */
+async function openStream(options: ApiOptions, body: unknown, signal?: AbortSignal): Promise<{ response: Response; idle: Idle }> {
+  const auth = await authorization(options);
+  const quiet = new AbortController();
+  const stop = signal ? AbortSignal.any([quiet.signal, signal]) : quiet.signal;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => quiet.abort(), options.timeoutMs);
+  };
+  const why = (error: unknown): Error => {
+    if (signal?.aborted) return new CancelledError();
+    if (quiet.signal.aborted) return new ApiError(`The model went ${Math.round(options.timeoutMs / 1000)} seconds without sending anything.`);
+    if (error instanceof ApiError || error instanceof CancelledError) return error;
+    return new ApiError(clean(options, `Lost the connection to ${providerName(options)}: ${(error as Error).message}`));
+  };
+  const idle: Idle = {
+    async read(step) {
+      try {
+        const value = await step;
+        arm();
+        return value;
+      } catch (error) {
+        throw why(error);
+      }
+    },
+    done: () => clearTimeout(timer),
+  };
+  arm();
+  try {
+    const response = await fetch(`${options.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream", Authorization: auth },
+      body: JSON.stringify(body),
+      signal: stop,
+    });
+    arm();
+    return { response, idle };
+  } catch (error) {
+    idle.done();
+    if (signal?.aborted || quiet.signal.aborted) throw why(error);
+    throw new ApiError(clean(options, `Couldn't reach ${providerName(options)}: ${(error as Error).message}`));
+  }
+}
+
 /** Where providers put a thinking model's reasoning in a reply's message. */
 interface ReasoningFields {
   reasoning?: unknown;
@@ -272,19 +534,25 @@ export function readReasoning(message: ReasoningFields | undefined, rawContent: 
  */
 function thinkParts(text: string): { reasoning: string[]; rest: string } {
   const reasoning: string[] = [];
-  let rest = text.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inside: string) => {
+  let rest = text.replace(/<(think|thought)>([\s\S]*?)<\/\1>/gi, (_m, _tag: string, inside: string) => {
     reasoning.push(inside);
     return "";
   });
-  const end = rest.toLowerCase().lastIndexOf("</think>");
-  if (end >= 0) {
-    reasoning.unshift(rest.slice(0, end).replace(/<\/think>/gi, ""));
-    rest = rest.slice(end + "</think>".length);
+  const close = /<\/(think|thought)>/gi;
+  let end = -1;
+  let endLength = 0;
+  for (let m = close.exec(rest); m; m = close.exec(rest)) {
+    end = m.index;
+    endLength = m[0].length;
   }
-  const open = rest.search(/<think>/i);
-  if (open >= 0) {
-    reasoning.push(rest.slice(open + "<think>".length));
-    rest = rest.slice(0, open);
+  if (end >= 0) {
+    reasoning.unshift(rest.slice(0, end).replace(close, ""));
+    rest = rest.slice(end + endLength);
+  }
+  const open = /<(think|thought)>/i.exec(rest);
+  if (open) {
+    reasoning.push(rest.slice(open.index + open[0].length));
+    rest = rest.slice(0, open.index);
   }
   return { reasoning: reasoning.map((r) => r.trim()).filter(Boolean), rest: rest.trim() };
 }
@@ -306,7 +574,7 @@ export function requestBody(request: CompletionRequest): Record<string, unknown>
     ...(request.minP != null ? { min_p: request.minP } : {}),
     ...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
     ...(request.tools && request.tools.length > 0 ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto" } : {}),
-    // The whole reply at once, not streamed word by word.
+    // The whole reply at once; streamChatCompletion turns this on.
     stream: false,
   };
   if (vertex) for (const field of VERTEX_UNSUPPORTED) delete body[field];

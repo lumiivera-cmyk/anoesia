@@ -29,7 +29,7 @@ function fieldBlocks(c: Card): PromptBlock[] {
 }
 
 function message(role: "user" | "assistant", content: string): Message {
-  return { id: content, chatId: "c", role, author: role === "user" ? "user" : "narrator", content, swipes: [content], swipeIndex: 0, profileId: "", model: "", createdAt: "", editedAt: null };
+  return { id: content, chatId: "c", role, author: role === "user" ? "user" : "narrator", content, swipes: [content], swipeIndex: 0, reasoning: "", profileId: "", model: "", createdAt: "", editedAt: null };
 }
 
 const seoul = card("Seoul", [["description", "A city."]], { isCharacter: false });

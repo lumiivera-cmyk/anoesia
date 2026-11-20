@@ -578,13 +578,13 @@ export class Store {
     return toMessage(row);
   }
 
-  addMessage(input: { chatId: string; role: "user" | "assistant"; author: string; content: string; profileId?: string; model?: string }): Message {
+  addMessage(input: { chatId: string; role: "user" | "assistant"; author: string; content: string; profileId?: string; model?: string; reasoning?: string }): Message {
     this.chat(input.chatId);
     const id = newId();
     const seq = (this.db.query("SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM messages WHERE chat_id = ?").get(input.chatId) as { n: number }).n;
     this.db
-      .query("INSERT INTO messages (id, chat_id, seq, role, author, swipes, swipe_index, profile_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)")
-      .run(id, input.chatId, seq, input.role, input.author, JSON.stringify([input.content]), input.profileId ?? "", input.model ?? "", now());
+      .query("INSERT INTO messages (id, chat_id, seq, role, author, swipes, reasonings, swipe_index, profile_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)")
+      .run(id, input.chatId, seq, input.role, input.author, JSON.stringify([input.content]), JSON.stringify([input.reasoning ?? ""]), input.profileId ?? "", input.model ?? "", now());
     this.touch(input.chatId);
     return this.message(id);
   }
@@ -600,10 +600,15 @@ export class Store {
   }
 
   /** Add a version (a regenerated reply) and show it. */
-  addSwipe(id: string, content: string, profileId: string, model: string): Message {
+  addSwipe(id: string, content: string, profileId: string, model: string, reasoning = ""): Message {
     const m = this.message(id);
     const swipes = [...m.swipes, content];
-    this.db.query("UPDATE messages SET swipes = ?, swipe_index = ?, profile_id = ?, model = ?, edited_at = NULL WHERE id = ?").run(JSON.stringify(swipes), swipes.length - 1, profileId, model, id);
+    const row = this.db.query("SELECT reasonings FROM messages WHERE id = ?").get(id) as { reasonings: string };
+    const reasonings = readReasonings(row.reasonings, m.swipes.length);
+    reasonings.push(reasoning);
+    this.db
+      .query("UPDATE messages SET swipes = ?, reasonings = ?, swipe_index = ?, profile_id = ?, model = ?, edited_at = NULL WHERE id = ?")
+      .run(JSON.stringify(swipes), JSON.stringify(reasonings), swipes.length - 1, profileId, model, id);
     this.touch(m.chatId);
     return this.message(id);
   }
@@ -671,6 +676,7 @@ function toMessage(r: Row): Message {
     content: swipes[swipeIndex] ?? "",
     swipes,
     swipeIndex,
+    reasoning: readReasonings(r.reasonings, swipes.length)[swipeIndex] ?? "",
     profileId: r.profile_id as string,
     model: r.model as string,
     createdAt: r.created_at as string,
@@ -815,4 +821,17 @@ function profileFields(raw: Row, creating: boolean): Partial<Profile> {
 
 function toPhoto(row: Row): Photo {
   return { id: String(row.id), name: String(row.name), url: `media/${row.id}.${row.ext}`, tint: String(row.tint), position: String(row.position), createdAt: String(row.created_at) };
+}
+
+/** A message's reasonings, one per version: padded with "" (older replies had none), never longer than its versions. */
+function readReasonings(raw: unknown, versions: number): string[] {
+  let list: unknown = [];
+  try {
+    list = JSON.parse(typeof raw === "string" ? raw : "[]");
+  } catch {
+    list = [];
+  }
+  const out = Array.isArray(list) ? list.map((r) => (typeof r === "string" ? r : "")) : [];
+  while (out.length < versions) out.push("");
+  return out.slice(0, versions);
 }

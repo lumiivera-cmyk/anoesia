@@ -22,6 +22,32 @@ const fake = Bun.serve({
     if (req.headers.get("authorization") === "Bearer bad") return Response.json({ error: { message: "Invalid API key" } }, { status: 401 });
     const body: any = await req.json();
     await Bun.sleep(Number(process.env.DELAY ?? 300));
+    // Streamed (story replies): a little reasoning, then the reply, a few words at a time (GAP ms apart).
+    if (body.stream) {
+      const reasoning = "Hana is early again. Ada should notice, but stay busy with the setlist. Keep it short and leave room for Hana to answer.";
+      const reply = "Ada glances up from the setlist. *She sets the pen down.*\n\n\"You're early,\" she says. \"Again.\" She slides the sheet across the table, one corner curling where her wrist has been resting on it.";
+      const words = (t: string) => t.match(/\S+\s*/g) ?? [];
+      const chunks = [...words(reasoning).map((w) => ({ reasoning: w })), ...words(reply).map((w) => ({ content: w }))];
+      const gap = Number(process.env.GAP ?? 60);
+      const enc = new TextEncoder();
+      return new Response(
+        new ReadableStream({
+          async start(c) {
+            try {
+              for (const delta of chunks) {
+                await Bun.sleep(gap);
+                c.enqueue(enc.encode(`data: ${JSON.stringify({ model: body.model, choices: [{ delta }] })}\n\n`));
+              }
+              c.enqueue(enc.encode("data: [DONE]\n\n"));
+              c.close();
+            } catch {
+              // stopped
+            }
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    }
     return Response.json({ model: body.model, choices: [{ message: { content: "Ada glances up from the setlist. *She sets the pen down.*\n\n\"You're early,\" she says. \"Again.\"" }, finish_reason: "stop" }] });
   },
 });
