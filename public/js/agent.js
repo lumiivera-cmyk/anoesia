@@ -13,6 +13,7 @@
 
 import { $, api, attempt, escapeHtml, formatText, loadState, sendsOnEnter, state } from "./core.js";
 import { openChat, renderChat as renderRoleplay } from "./chat.js";
+import { reloadPrompts } from "./prompts.js";
 import { renderSide } from "./side.js";
 
 const agent = {
@@ -344,6 +345,8 @@ async function refreshApp() {
     await openChat(state.chatId);
     // openChat only loads; draw the messages so the agent's edits show at once.
     renderRoleplay();
+    // An open prompts page shows the agent's block edits too.
+    await reloadPrompts();
   }
 }
 
