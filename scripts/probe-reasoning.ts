@@ -1,7 +1,12 @@
 /**
  * Which way of asking gets a model's reasoning back from nanoGPT.
  *
- *   cd /opt/anoesia && sudo -u anoesia bun run scripts/probe-reasoning.ts [model id]
+ *   cd /opt/anoesia && sudo -u anoesia bun run scripts/probe-reasoning.ts [model id] [provider]
+ *
+ * With a provider (an id from the list it prints first, e.g. siliconflow),
+ * every request is pinned to that provider (nanoGPT's `provider` field).
+ * That's always pay-as-you-go: turn on "Enable paid models on API" in your
+ * nanoGPT settings first, or nanoGPT refuses it without charging.
  *
  * Without a model id it uses the story profile's model (Settings →
  * Connections). It sends one short question several ways, streamed and
@@ -27,6 +32,7 @@ if (!api.apiKey) {
 }
 
 let model = process.argv[2]?.trim() ?? "";
+const provider = process.argv[3]?.trim() ?? "";
 let effort: string | null = "high";
 if (!model) {
   const store = new Store(openDatabase(join(config.dataDir, "anoesia.db")));
@@ -42,6 +48,7 @@ if (!model) {
 
 const base = {
   model,
+  ...(provider ? { provider } : {}),
   messages: [{ role: "user", content: "A train leaves at 3:40 and the trip takes 2 h 35 min. When does it arrive? Answer in one sentence." }],
   temperature: 0.6,
   max_tokens: 1500,
@@ -56,7 +63,8 @@ const ways: [string, Record<string, unknown>][] = [
   ["streamed, chat_template_kwargs thinking", { reasoning_effort: effort, chat_template_kwargs: { thinking: true }, stream: true }],
 ];
 
-console.log(`Model: ${model}\n`);
+console.log(`Model: ${model}${provider ? `, provider ${provider} (pay-as-you-go)` : ""}`);
+console.log(`Providers: ${await providers(model)}\n`);
 for (const [name, extra] of ways) {
   try {
     console.log(`${name}: ${await probe({ ...base, ...extra })}`);
@@ -102,4 +110,19 @@ async function probe(body: Record<string, unknown>): Promise<string> {
   if (think) parts.push(`<think> in content ${think.length}`);
   const sample = (got.reasoning ?? got.reasoning_content ?? got.reasoning_details ?? think).replace(/\s+/g, " ").slice(0, 70);
   return `${parts.join(", ") || "nothing"}${sample ? ` | reasoning starts: "${sample}"` : ""}`;
+}
+
+/** The providers nanoGPT can route this model to (its provider list; not under /api/v1). */
+async function providers(id: string): Promise<string> {
+  try {
+    const origin = new URL(api.baseUrl).origin;
+    const canonical = id.replace(/:[^/]*$/, "");
+    const response = await fetch(`${origin}/api/models/${encodeURIComponent(canonical)}/providers`, { headers: { Authorization: `Bearer ${api.apiKey}` }, signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) return `couldn't list them (HTTP ${response.status})`;
+    const json = (await response.json()) as { supportsProviderSelection?: boolean; providers?: { provider?: string; available?: boolean }[] };
+    const list = (json.providers ?? []).map((p) => `${p.provider}${p.available === false ? " (unavailable)" : ""}`).join(", ");
+    return `${list || "none listed"}${json.supportsProviderSelection === false ? " (this model can't be pinned to one)" : ""}`;
+  } catch (error) {
+    return `couldn't list them (${(error as Error).message})`;
+  }
 }
