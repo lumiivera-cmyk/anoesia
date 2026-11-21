@@ -9,6 +9,13 @@ test("a reply so far: <think> and <thought> become reasoning, and half a tag nev
   expect(liveReply("<think>Plan</think>Hi", "")).toEqual({ reasoning: "Plan", content: "Hi" });
   expect(liveReply("Plan</think>Hi", "")).toEqual({ reasoning: "Plan", content: "Hi" });
   expect(liveReply("<thought>Hm</thought>Yes", "")).toEqual({ reasoning: "Hm", content: "Yes" });
+  // <thinking> and <reasoning>: tags a model asked to think in its reply can use (DeepSeek drops <think> itself, a special token)
+  expect(liveReply("<thinking>Hm</thinking>Yes", "")).toEqual({ reasoning: "Hm", content: "Yes" });
+  expect(liveReply("<reasoning>Hm</reasoning>Yes", "")).toEqual({ reasoning: "Hm", content: "Yes" });
+  expect(liveReply("<thinking>Still going", "")).toEqual({ reasoning: "Still going", content: "" });
+  expect(liveReply("<thinking>Hm</thinking>Yes <reas", "")).toEqual({ reasoning: "Hm", content: "Yes" });
+  // a < that can't start a tag stays
+  expect(liveReply("Five <b", "")).toEqual({ reasoning: "", content: "Five <b" });
   // Reasoning sent apart from the text wins, as for a whole reply.
   expect(liveReply("Hi", " Thinking. ")).toEqual({ reasoning: "Thinking.", content: "Hi" });
 });
