@@ -13,9 +13,9 @@
    ===================================================================================== */
 
 /* ---------------------------------------------------------------- base */
-html{--window:var(--window-set,.72);--photo-pos:50% 50%;background:var(--page);color-scheme:dark;-webkit-text-size-adjust:100%}
+html{overscroll-behavior:none;--window:var(--window-set,.72);--photo-pos:50% 50%;background:var(--page);color-scheme:dark;-webkit-text-size-adjust:100%}
 @media (max-width:899px){html{--window:var(--window-set,.7)}}
-body{margin:0;min-height:100dvh;font-size:var(--fs-md);line-height:22px;background:var(--ground-bg)}
+body{margin:0;min-height:100dvh;overscroll-behavior:none;font-size:var(--fs-md);line-height:22px;background:var(--ground-bg)}
 select,option{font:inherit;color:inherit}
 select:focus-visible,summary:focus-visible,label:focus-within>input[type=file]+*{outline:3px solid var(--focus);outline-offset:3px}
 h1,h2,h3{margin:0}
