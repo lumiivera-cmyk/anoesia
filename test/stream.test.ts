@@ -19,6 +19,8 @@ test("a reasoning that's only the reply again isn't reasoning", () => {
   expect(echoes("She  said\nhi.", "She said hi.")).toBe(true);
   expect(echoes("Keep it short.", "She said hi.")).toBe(false);
   expect(liveReply("She said hi.", "She said hi.")).toEqual({ reasoning: "", content: "She said hi." });
+  // the reasoning field only echoes, but reasoning_details had the real thinking
+  expect(liveReply("She said hi.", "She said hi.", "Be brief.")).toEqual({ reasoning: "Be brief.", content: "She said hi." });
   // reasoning that arrived before any text still shows while it's alone
   expect(liveReply("", "She said")).toEqual({ reasoning: "She said", content: "" });
 });

@@ -334,8 +334,8 @@ export async function streamChatCompletion(
       return result;
     }
 
-    const acc = { raw: "", fieldReasoning: "", model: "", finishReason: null as string | null, fields: new Set<string>() };
-    const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning);
+    const acc: StreamAcc = { raw: "", fieldReasoning: "", detailsReasoning: "", model: "", finishReason: null, fields: new Set<string>() };
+    const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning, acc.detailsReasoning);
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -375,13 +375,12 @@ export async function streamChatCompletion(
       );
     }
     target.onResult?.(provider, { ok: true, ms: Date.now() - started });
-    if (target.provider === "vertex") {
-      // One line per reply, so "no thinking shows" can be traced from the server's log (journalctl -u anoesia).
-      const asked = used < tries.length - 1 ? `asked (form ${used + 1} of ${tries.length - 1})` : tries.length > 1 ? "refused" : "not asked";
-      console.log(
-        `Vertex AI reply: ${acc.model || request.model}; thoughts ${asked}; ${final.reasoning.length} characters of reasoning, ${final.content.length} of text; fields seen: ${[...acc.fields].join(", ") || "none"}${refusals.length ? `; Google said: ${refusals.join(" | ")}` : ""}`,
-      );
-    }
+    // One line per reply, so a missing or odd reasoning fold can be traced from the server's log (journalctl -u anoesia).
+    const echoed = [acc.fieldReasoning, acc.detailsReasoning].some((r) => echoes(r, final.content));
+    const asked = target.provider !== "vertex" ? "" : `; thoughts ${used < tries.length - 1 ? `asked (form ${used + 1} of ${tries.length - 1})` : tries.length > 1 ? "refused" : "not asked"}`;
+    console.log(
+      `${providerName(target)} reply: ${acc.model || request.model}${asked}; ${final.reasoning.length} characters of reasoning, ${final.content.length} of text${echoed ? " (a reasoning field only repeated the text, so it was dropped)" : ""}; fields seen: ${[...acc.fields].join(", ") || "none"}${refusals.length ? `; Google said: ${refusals.join(" | ")}` : ""}`,
+    );
     return { content: final.content, toolCalls: [], model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning };
   } catch (error) {
     throw fail(error);
@@ -424,7 +423,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Read one streamed chunk into `acc`. Returns whether the reply changed. */
-function readChunk(data: string, acc: { raw: string; fieldReasoning: string; model: string; finishReason: string | null; fields: Set<string> }, target: ApiOptions): boolean {
+/** A streamed reply as its chunks arrive. Reasoning fields and reasoning_details are kept apart, as one may only echo the reply. */
+interface StreamAcc {
+  raw: string;
+  fieldReasoning: string;
+  detailsReasoning: string;
+  model: string;
+  finishReason: string | null;
+  /** The delta fields seen, for the log. */
+  fields: Set<string>;
+}
+
+function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
   let json: unknown;
   try {
     json = JSON.parse(data);
@@ -448,21 +458,22 @@ function readChunk(data: string, acc: { raw: string; fieldReasoning: string; mod
     if (value === null || value === "" || key === "role") continue;
     acc.fields.add(isRecord(value) ? `${key}{${Object.keys(value).join(",")}}` : key);
   }
-  const before = acc.raw.length + acc.fieldReasoning.length;
+  const size = () => acc.raw.length + acc.fieldReasoning.length + acc.detailsReasoning.length;
+  const before = size();
   const thought = delta.extra_content?.google?.thought === true;
   const field = [delta.reasoning, delta.reasoning_content].find((v) => typeof v === "string" && v !== "");
   if (typeof field === "string") acc.fieldReasoning += field;
-  else if (Array.isArray(delta.reasoning_details)) {
+  if (Array.isArray(delta.reasoning_details)) {
     for (const d of delta.reasoning_details) {
       const t = (d as { text?: unknown })?.text ?? (d as { summary?: unknown })?.summary;
-      if (typeof t === "string") acc.fieldReasoning += t;
+      if (typeof t === "string") acc.detailsReasoning += t;
     }
   }
   if (typeof delta.content === "string") {
     if (thought) acc.fieldReasoning += delta.content;
     else acc.raw += delta.content;
   }
-  return acc.raw.length + acc.fieldReasoning.length !== before;
+  return size() !== before;
 }
 
 /**
@@ -471,10 +482,11 @@ function readChunk(data: string, acc: { raw: string; fieldReasoning: string; mod
  * tag half arrived at the very end is held back, so it never flashes up as
  * text.
  */
-export function liveReply(raw: string, fieldReasoning: string): LiveReply {
+export function liveReply(raw: string, fieldReasoning: string, detailsReasoning = ""): LiveReply {
   const parts = thinkParts(raw.replace(/<\/?(t(h(i(n(k)?)?|o(u(g(h(t)?)?)?)?)?)?)?$/i, ""));
-  const reasoning = fieldReasoning.trim() ? fieldReasoning.trim() : parts.reasoning.join("\n\n");
-  return { reasoning: echoes(reasoning, parts.rest) ? "" : reasoning, content: parts.rest };
+  // The first that has something and isn't the reply again: the reasoning field, its details, then <think> text.
+  const reasoning = [fieldReasoning, detailsReasoning, parts.reasoning.join("\n\n")].map((r) => r.trim()).find((r) => r && !echoes(r, parts.rest)) ?? "";
+  return { reasoning, content: parts.rest };
 }
 
 /**
