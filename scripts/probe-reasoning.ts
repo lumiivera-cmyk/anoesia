@@ -61,6 +61,11 @@ const ways: [string, Record<string, unknown>][] = [
   ["streamed, reasoning.enabled", { reasoning: { enabled: true, effort }, stream: true }],
   ["streamed, thinking.type enabled", { thinking: { type: "enabled" }, stream: true }],
   ["streamed, chat_template_kwargs thinking", { reasoning_effort: effort, chat_template_kwargs: { thinking: true }, stream: true }],
+  // No switch: the prompt asks it to think in its reply. <think> is a special token for some models (DeepSeek), which providers strip, so try <thinking> too.
+  ...(["think", "thinking"] as const).map((tag): [string, Record<string, unknown>] => [
+    `streamed, asked in the prompt to think in <${tag}> tags`,
+    { stream: true, messages: [{ role: "system", content: `Before you answer, think it through step by step inside <${tag}></${tag}> tags. Then close the tag and give the answer.` }, ...base.messages] },
+  ]),
 ];
 
 console.log(`Model: ${model}${provider ? `, provider ${provider} (pay-as-you-go)` : ""}`);
@@ -105,11 +110,13 @@ async function probe(body: Record<string, unknown>): Promise<string> {
     read(((await response.json()) as any).choices?.[0]?.message);
   }
   const content = got.content ?? "";
-  const think = /<think>([\s\S]*?)<\/think>/i.exec(content)?.[1] ?? "";
-  const parts = Object.entries(got).map(([k, v]) => `${k} ${v.length}${k !== "content" && echoes(v, content.replace(/<think>[\s\S]*?<\/think>/i, "")) ? " (only the reply again)" : ""}`);
-  if (think) parts.push(`<think> in content ${think.length}`);
+  const think = /<(think|thinking)>([\s\S]*?)<\/\1>/i.exec(content)?.[2] ?? "";
+  const parts = Object.entries(got).map(([k, v]) => `${k} ${v.length}${k !== "content" && (echoes(v, content) || echoes(v, content.replace(/<(think|thinking)>[\s\S]*?<\/\1>/i, ""))) ? " (only the reply again)" : ""}`);
+  if (think) parts.push(`tagged thinking in the text ${think.length}`);
   const sample = (got.reasoning ?? got.reasoning_content ?? got.reasoning_details ?? think).replace(/\s+/g, " ").slice(0, 70);
-  return `${parts.join(", ") || "nothing"}${sample ? ` | reasoning starts: "${sample}"` : ""}`;
+  // The text itself, so a stripped tag (thinking with no tags around it) shows.
+  const text = content.replace(/\s+/g, " ").slice(0, 110);
+  return `${parts.join(", ") || "nothing"}${sample ? ` | reasoning starts: "${sample}"` : ""}${body.messages !== base.messages ? ` | text starts: "${text}"` : ""}`;
 }
 
 /** The providers nanoGPT can route this model to (its provider list; not under /api/v1). */
