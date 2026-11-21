@@ -334,6 +334,7 @@ function echoes(reasoning, content) {
 
 function messageHtml(m, isLastReply) {
   const you = m.role === "user";
+  const isLast = m === state.messages.at(-1);
   const persona = personaOf(state.chat);
   const meta = [timeLabel(m.createdAt), m.editedAt ? "edited" : "", !you && m.model ? shortModel(m.model) : ""].filter(Boolean).join(" · ");
   const versions = versionsHtml(m);
@@ -341,6 +342,7 @@ function messageHtml(m, isLastReply) {
   const acts = `<span class="acts">
       <button type="button" class="ghost press ib act" data-act="copy" aria-label="Copy" title="Copy">${icon.copy()}</button>
       <button type="button" class="ghost press ib act" data-act="edit" aria-label="Edit" title="Edit">${icon.edit()}</button>
+      ${isLast ? "" : `<button type="button" class="ghost press ib act" data-act="rewind" aria-label="Rewind to here" title="Rewind to here">${icon.rewind()}</button>`}
       <button type="button" class="ghost press ib act" data-act="delete" aria-label="Delete" title="Delete">${icon.trash()}</button>
       ${versions}${regen}
     </span>`;
@@ -405,6 +407,25 @@ async function act(what, m, article, opener) {
     await attempt(() => api("DELETE", `/api/messages/${m.id}`));
     return refresh();
   }
+  if (what === "rewind") {
+    const after = state.messages.length - 1 - state.messages.indexOf(m);
+    if (after < 1) return;
+    const ok = await confirmDialog({
+      title: "Rewind to here?",
+      body: [
+        after === 1 ? "The message after this one goes for good." : `The ${after} messages after this one go for good, with all their versions.`,
+        "The chat's notes and cast stay as they are now, so check \u201cRight now\u201d if the story moved on after this point.",
+      ],
+      confirm: "rewind",
+      keep: "keep them",
+      icon: icon.rewind(16),
+      opener,
+    });
+    if (!ok) return;
+    const view = await attempt(() => api("POST", `/api/chats/${state.chatId}/rewind`, { messageId: m.id }));
+    if (view) await refresh();
+    return;
+  }
   if (what === "prev" || what === "next") {
     const view = await attempt(() => api("PATCH", `/api/messages/${m.id}`, { swipeIndex: m.swipeIndex + (what === "next" ? 1 : -1) }));
     if (view) await refresh();
@@ -421,6 +442,7 @@ function openMessageMenu(m, article) {
     ["copy", icon.copy(20), "Copy"],
     ["edit", icon.edit(20), "Edit"],
     ...(isLastReply ? [["regen", icon.regen(20), "Regenerate"]] : []),
+    ...(m === state.messages.at(-1) ? [] : [["rewind", icon.rewind(20), "Rewind to here"]]),
     ["delete", icon.trash(20), "Delete"],
   ];
   $("message-menu-items").innerHTML = items

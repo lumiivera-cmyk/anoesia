@@ -75,8 +75,12 @@ function place(dialog, anchor) {
 }
 
 /** A small confirmation: resolves true when the confirming button is pressed. */
-export function confirmDialog({ title, body, confirm, keep = "keep it", danger = true, opener }) {
+export function confirmDialog({ title, body, confirm, keep = "keep it", danger = true, opener, icon = null }) {
   const dialog = document.getElementById("confirm-dialog");
+  // The confirm button's icon: a bin unless the caller brings its own (an SVG string).
+  const mark = dialog.querySelector("#confirm-icon");
+  mark.dataset.bin ??= mark.innerHTML;
+  mark.innerHTML = icon ?? mark.dataset.bin;
   dialog.querySelector("#confirm-title").textContent = title;
   const desc = dialog.querySelector("#confirm-body");
   desc.replaceChildren(...[body].flat().map((t) => Object.assign(document.createElement("p"), { textContent: t })));

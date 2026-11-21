@@ -621,6 +621,21 @@ export class Store {
     return this.message(id);
   }
 
+  /**
+   * Rewind a chat to one of its messages: every message after it goes, for
+   * good. The message itself stays, and so do the chat's notes, cast and
+   * blocks (they aren't kept per message). Returns how many went.
+   */
+  rewindChat(chatId: string, messageId: unknown): number {
+    if (typeof messageId !== "string") throw new ValidationError("Say which message to rewind to.");
+    const m = this.message(messageId);
+    if (m.chatId !== chatId) throw new NotFoundError("message");
+    const seq = (this.db.query("SELECT seq FROM messages WHERE id = ?").get(messageId) as { seq: number }).seq;
+    const gone = this.db.query("DELETE FROM messages WHERE chat_id = ? AND seq > ?").run(chatId, seq).changes;
+    if (gone) this.touch(chatId);
+    return gone;
+  }
+
   deleteMessage(id: string): void {
     const m = this.message(id);
     this.db.query("DELETE FROM messages WHERE id = ?").run(id);
