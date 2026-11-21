@@ -21,6 +21,12 @@ test("a reasoning that's only the reply again isn't reasoning", () => {
   expect(liveReply("She said hi.", "She said hi.")).toEqual({ reasoning: "", content: "She said hi." });
   // the reasoning field only echoes, but reasoning_details had the real thinking
   expect(liveReply("She said hi.", "She said hi.", "Be brief.")).toEqual({ reasoning: "Be brief.", content: "She said hi." });
+  // a model asked to think in <think> tags, whose reasoning field echoes the whole reply, tags and all
+  const tagged = "<think>Keep it short.</think>She said hi.";
+  expect(liveReply(tagged, tagged, tagged)).toEqual({ reasoning: "Keep it short.", content: "She said hi." });
+  // the same model once it's known to echo: the echo streams as the text, its <think> part still folded away
+  expect(liveReply("", "<think>Keep it", "", true)).toEqual({ reasoning: "Keep it", content: "" });
+  expect(liveReply("", tagged, "", true)).toEqual({ reasoning: "Keep it short.", content: "She said hi." });
   // reasoning that arrived before any text still shows while it's alone
   expect(liveReply("", "She said")).toEqual({ reasoning: "She said", content: "" });
 });

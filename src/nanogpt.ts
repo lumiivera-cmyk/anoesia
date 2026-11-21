@@ -380,7 +380,7 @@ export async function streamChatCompletion(
 
     const final = live();
     const field = acc.fieldReasoning.trim();
-    const reasoningEchoed = field ? echoes(field, final.content) || (!final.content && Boolean(request.reasoningEchoes)) : undefined;
+    const reasoningEchoed = field ? echoes(field, final.content) || echoes(field, acc.raw.trim()) || (!final.content && Boolean(request.reasoningEchoes)) : undefined;
     if (!final.content && !request.allowEmpty) {
       throw new ApiError(
         acc.finishReason === "length"
@@ -390,7 +390,7 @@ export async function streamChatCompletion(
     }
     target.onResult?.(provider, { ok: true, ms: Date.now() - started });
     // One line per reply, so a missing or odd reasoning fold can be traced from the server's log (journalctl -u anoesia).
-    const echoed = [acc.fieldReasoning, acc.detailsReasoning].some((r) => echoes(r, final.content));
+    const echoed = [acc.fieldReasoning, acc.detailsReasoning].some((r) => echoes(r, final.content) || echoes(r, acc.raw.trim()));
     const asked = target.provider !== "vertex" ? "" : `; thoughts ${used < tries.length - 1 ? `asked (form ${used + 1} of ${tries.length - 1})` : tries.length > 1 ? "refused" : "not asked"}`;
     console.log(
       `${providerName(target)} reply: ${acc.model || request.model}${asked}; ${final.reasoning.length} characters of reasoning, ${final.content.length} of text${echoed ? " (a reasoning field only repeated the text, so it was dropped)" : ""}; fields seen: ${[...acc.fields].join(", ") || "none"}${refusals.length ? `; Google said: ${refusals.join(" | ")}` : ""}`,
@@ -499,12 +499,18 @@ function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
 export function liveReply(raw: string, fieldReasoning: string, detailsReasoning = "", echoMode = false): LiveReply {
   const parts = thinkParts(raw.replace(/<\/?(t(h(i(n(k)?)?|o(u(g(h(t)?)?)?)?)?)?)?$/i, ""));
   // A model known to send its reply as reasoning, with no text yet: that "reasoning" is the reply arriving.
-  if (echoMode && !parts.rest && fieldReasoning.trim()) {
-    const other = [detailsReasoning, parts.reasoning.join("\n\n")].map((r) => r.trim()).find(Boolean) ?? "";
-    return { reasoning: other, content: fieldReasoning.trim() };
+  // Read it as the text itself, so <think> tags in it (a model asked to think in its reply) still fold away.
+  if (echoMode && !raw.trim() && fieldReasoning.trim()) {
+    const asText = liveReply(fieldReasoning, "");
+    return { reasoning: asText.reasoning || detailsReasoning.trim(), content: asText.content };
   }
-  // The first that has something and isn't the reply again: the reasoning field, its details, then <think> text.
-  const reasoning = [fieldReasoning, detailsReasoning, parts.reasoning.join("\n\n")].map((r) => r.trim()).find((r) => r && !echoes(r, parts.rest)) ?? "";
+  // The first that has something and isn't the reply again (with or without its <think> part):
+  // the reasoning field, its details, then <think> text.
+  const whole = raw.trim();
+  const isEcho = (r: string) => echoes(r, parts.rest) || echoes(r, whole);
+  const sent = [fieldReasoning, detailsReasoning].map((r) => r.trim()).find((r) => r && !isEcho(r));
+  const tagged = parts.reasoning.join("\n\n");
+  const reasoning = sent ?? (echoes(tagged, parts.rest) ? "" : tagged);
   return { reasoning, content: parts.rest };
 }
 
