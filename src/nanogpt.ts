@@ -497,7 +497,7 @@ function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
  * text.
  */
 export function liveReply(raw: string, fieldReasoning: string, detailsReasoning = "", echoMode = false): LiveReply {
-  const parts = thinkParts(raw.replace(/<\/?(t(h(i(n(k)?)?|o(u(g(h(t)?)?)?)?)?)?)?$/i, ""));
+  const parts = thinkParts(holdBackTag(raw));
   // A model known to send its reply as reasoning, with no text yet: that "reasoning" is the reply arriving.
   // Read it as the text itself, so <think> tags in it (a model asked to think in its reply) still fold away.
   if (echoMode && !raw.trim() && fieldReasoning.trim()) {
@@ -512,6 +512,17 @@ export function liveReply(raw: string, fieldReasoning: string, detailsReasoning 
   const tagged = parts.reasoning.join("\n\n");
   const reasoning = sent ?? (echoes(tagged, parts.rest) ? "" : tagged);
   return { reasoning, content: parts.rest };
+}
+
+/** The tags a model's reasoning can come in: `<think>` (DeepSeek, Qwen...), `<thought>` (Gemini), and `<thinking>`/`<reasoning>` for a model asked to think in its reply. */
+const THINK_TAGS = ["thinking", "thought", "think", "reasoning"];
+
+/** The text without a reasoning tag half arrived at its very end, so it never flashes up as text. */
+function holdBackTag(text: string): string {
+  const m = /<\/?([a-z]*)$/i.exec(text);
+  if (!m) return text;
+  const name = m[1]!.toLowerCase();
+  return THINK_TAGS.some((t) => t.startsWith(name)) ? text.slice(0, m.index) : text;
 }
 
 /**
@@ -614,11 +625,11 @@ export function readReasoning(message: ReasoningFields | undefined, rawContent: 
  */
 function thinkParts(text: string): { reasoning: string[]; rest: string } {
   const reasoning: string[] = [];
-  let rest = text.replace(/<(think|thought)>([\s\S]*?)<\/\1>/gi, (_m, _tag: string, inside: string) => {
+  let rest = text.replace(/<(thinking|thought|think|reasoning)>([\s\S]*?)<\/\1>/gi, (_m, _tag: string, inside: string) => {
     reasoning.push(inside);
     return "";
   });
-  const close = /<\/(think|thought)>/gi;
+  const close = /<\/(thinking|thought|think|reasoning)>/gi;
   let end = -1;
   let endLength = 0;
   for (let m = close.exec(rest); m; m = close.exec(rest)) {
@@ -629,7 +640,7 @@ function thinkParts(text: string): { reasoning: string[]; rest: string } {
     reasoning.unshift(rest.slice(0, end).replace(close, ""));
     rest = rest.slice(end + endLength);
   }
-  const open = /<(think|thought)>/i.exec(rest);
+  const open = /<(thinking|thought|think|reasoning)>/i.exec(rest);
   if (open) {
     reasoning.push(rest.slice(open.index + open[0].length));
     rest = rest.slice(0, open.index);
