@@ -538,6 +538,26 @@ describe("streaming a reply", () => {
     expect(done.messages.at(-1)).toMatchObject({ content: "Ada looks up.", reasoning: "" });
   });
 
+  test("a model that sends its reply as reasoning first: after the first time, it streams as text", async () => {
+    const { chat } = await setUp();
+    // Like DeepSeek V3.1 Terminus on nanoGPT: the reply word by word as "reasoning", then all of it as text.
+    const echo = [{ reasoning: "Ada " }, { reasoning: "looks up." }, { content: "Ada looks up." }];
+    streams(echo);
+    const send = async () => events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" })));
+    const first = await send();
+    expect(first.at(-1).messages.at(-1)).toMatchObject({ content: "Ada looks up.", reasoning: "" });
+    const second = await send();
+    const more = second.filter((e) => e.type === "more");
+    expect(more.map((e) => e.reasoning).join("")).toBe("");
+    expect(more.map((e) => e.content).join("")).toBe("Ada looks up.");
+    expect(second.at(-1).messages.at(-1)).toMatchObject({ content: "Ada looks up.", reasoning: "" });
+    expect(JSON.parse(readFileSync(join(dir, "reasoning-echoes.json"), "utf8"))).toEqual(["nanogpt:test/model"]);
+    // It thinks for real after all: off the list, and its reasoning is kept.
+    streams([{ reasoning: "Be brief." }, { content: "Ada nods." }]);
+    expect((await send()).at(-1).messages.at(-1)).toMatchObject({ content: "Ada nods.", reasoning: "Be brief." });
+    expect(JSON.parse(readFileSync(join(dir, "reasoning-echoes.json"), "utf8"))).toEqual([]);
+  });
+
   test("<think> tags split live: reasoning first, then the text", async () => {
     const { chat } = await setUp();
     streams([{ content: "<thi" }, { content: "nk>Plan" }, { content: " it.</th" }, { content: "ink>Hello" }]);

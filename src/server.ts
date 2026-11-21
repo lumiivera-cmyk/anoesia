@@ -3,7 +3,7 @@
  * under `/api/`. Start it with `bun start`.
  */
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { parseCards } from "./cards.ts";
 import { loadConfig, type Config } from "./config.ts";
@@ -44,6 +44,24 @@ export function createApp(config: Config): App {
   const api: ApiOptions = { apiKey: config.apiKey, baseUrl: config.apiBaseUrl, timeoutMs: config.requestTimeoutMs, vertex: config.vertex };
   // Keys saved in Settings override .env's, and every request reports how the provider answered.
   const providers = new Providers(config, api);
+  /**
+   * Models seen sending their reply as "reasoning" too (provider:model),
+   * so their next replies stream as text from the start. Kept in the data
+   * folder; a model that sends real reasoning comes off the list.
+   */
+  const echoFile = join(config.dataDir, "reasoning-echoes.json");
+  const echoModels = new Set<string>(readEchoModels(echoFile));
+  function noteEcho(key: string, echoed: boolean | undefined): void {
+    if (echoed === undefined || echoed === echoModels.has(key)) return;
+    if (echoed) echoModels.add(key);
+    else echoModels.delete(key);
+    try {
+      writeFileSync(echoFile, JSON.stringify([...echoModels], null, 2));
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   /** The reply being written in each chat, so Stop can end it, a second one can't start, and the page can watch it arrive. */
   const running = new Map<string, Live>();
 
@@ -102,6 +120,7 @@ export function createApp(config: Config): App {
     let content: string;
     let reasoning: string;
     let model = profile.model;
+    const echoKey = `${profile.provider}:${profile.model}`;
     try {
       const result = await streamChatCompletion(
         api,
@@ -116,9 +135,11 @@ export function createApp(config: Config): App {
           reasoningEffort: profile.reasoningEffort,
           extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Json) : undefined,
           signal: live.controller.signal,
+          reasoningEchoes: echoModels.has(echoKey),
         },
         (next) => update(live, next),
       );
+      noteEcho(echoKey, result.reasoningEchoed);
       content = cleanReply(result.content);
       reasoning = result.reasoning;
       model = result.model;
@@ -540,6 +561,15 @@ interface Live {
   reply: LiveReply;
   watchers: Set<(event: Json) => void>;
   finished: Promise<{ error?: string }>;
+}
+
+function readEchoModels(file: string): string[] {
+  try {
+    const list = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    return Array.isArray(list) ? list.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function providerId(raw: string): ProviderId {
