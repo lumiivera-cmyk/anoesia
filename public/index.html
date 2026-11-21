@@ -47,14 +47,13 @@
             </div>
             <button type="button" class="btnreset hit44 phone-title phone-only" id="phone-title" aria-label="Chat settings"></button>
             <ul class="cast-chips wide-only" id="cast-chips" aria-label="Cast"></ul>
-            <div class="head-buttons wide-only">
-              <a class="raised press ib" id="go-preview" href="#/prompts/preview" aria-label="Preview what gets sent" title="Preview"></a>
-              <a class="raised press ib" id="go-prompts" href="#/prompts" aria-label="Prompts page" title="Prompts"></a>
+            <div class="head-buttons">
+              <a class="raised press ib" id="go-preview" href="#/prompts/preview" aria-label="Preview what gets sent" title="Preview what gets sent"></a>
+              <a class="raised press ib" id="go-prompts" href="#/prompts" aria-label="Prompts page" title="Prompts page"></a>
               <button type="button" class="raised press ib" id="open-chat-settings" aria-label="Chat settings" title="Chat settings"></button>
-              <button type="button" class="btn raised press" id="open-agent" title="Open the agent">Agent</button>
+              <button type="button" class="btn raised press wide-only" id="open-agent" title="Open the agent">Agent</button>
+              <button type="button" class="raised press ib phone-only" id="open-agent-phone" aria-label="Open the agent" title="Agent">A</button>
             </div>
-            <button type="button" class="ghost press ib phone-only" id="open-agent-phone" aria-label="Open the agent" title="Agent">A</button>
-            <button type="button" class="ghost press ib phone-only" id="open-chat-menu" aria-label="Preview, prompts and chat settings"></button>
           </header>
 
           <div class="msgs-scroll scroll" id="messages-scroll" tabindex="0" aria-label="Messages">
@@ -195,14 +194,6 @@
 
     <!-- Overlays. Each is a <dialog>: see js/overlay.js. -->
     <dialog class="ov drawer glass" id="drawer" aria-label="Chats and app"></dialog>
-
-    <dialog class="ov menu raised pop" id="chat-menu" aria-label="Chat" data-align="end">
-      <div role="menu" aria-label="Chat">
-        <button type="button" role="menuitem" class="press" data-go="#/prompts/preview"><span class="mi" id="cm-eye"></span>Preview what gets sent</button>
-        <button type="button" role="menuitem" class="press" data-go="#/prompts"><span class="mi" id="cm-prompts"></span>Prompts page</button>
-        <button type="button" role="menuitem" class="press" data-act="chat-settings"><span class="mi" id="cm-settings"></span>Chat settings</button>
-      </div>
-    </dialog>
 
     <!-- The scene: who's onstage, and the chat's notes (js/scene.js). -->
     <dialog class="ov menu raised pop sheet-on-phone scene-menu" id="scene-menu" aria-labelledby="scene-title" data-side="above"></dialog>

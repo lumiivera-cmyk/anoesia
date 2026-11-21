@@ -70,7 +70,6 @@ const LACQUER = {
     ["chat", chat("Backstage")],
     ["chat empty", chat("Night market")],
     ["drawer", then(chat("Backstage"), tap("#open-drawer"))],
-    ["chat menu", then(chat("Backstage"), tap("#open-chat-menu"))],
     ["message menu", then(chat("Backstage"), tap("#messages .msg:last-of-type .msg-body"))],
     ["chat settings", then(chat("Backstage"), tap("#phone-title"))],
     ["scene", then(chat("Backstage"), tap("#open-scene"))],

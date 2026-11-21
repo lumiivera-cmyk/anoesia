@@ -110,7 +110,7 @@ export function renderChat(scrollToEnd = false) {
   $("phone-title").innerHTML = `<span class="pt-name">${escapeHtml(chat ? chat.name : "Anoesia")}</span>
     <span class="pt-line">${others.length ? `<span class="pt-gems">${others.map((c) => gem(c, 12, { label: false, extraClass: isOffstage(c.id) ? "is-offstage" : "" })).join("")}</span>` : ""}<span class="meta">${escapeHtml(chat ? castLine : "")}</span></span>`;
   $("phone-title").setAttribute("aria-label", `${chat ? `${chat.name} ${castLine}` : "Anoesia"}: chat settings`);
-  for (const id of ["go-preview", "go-prompts", "open-chat-settings", "open-chat-menu", "phone-title", "open-scene"]) {
+  for (const id of ["go-preview", "go-prompts", "open-chat-settings", "phone-title", "open-scene"]) {
     const el = $(id);
     if (chat) el.removeAttribute("aria-disabled");
     else el.setAttribute("aria-disabled", "true");
@@ -612,11 +612,7 @@ export function wireChat() {
   $("open-chat-settings").innerHTML = icon.sliders();
   $("go-preview").innerHTML = icon.eye();
   $("go-prompts").innerHTML = icon.prompts(20, false);
-  $("open-chat-menu").innerHTML = icon.more();
   $("dismiss-error").innerHTML = icon.close(18);
-  $("cm-eye").innerHTML = icon.eye();
-  $("cm-prompts").innerHTML = icon.prompts(20, false);
-  $("cm-settings").innerHTML = icon.sliders();
 
   $("messages").addEventListener("click", onMessageClick);
   $("cast-chips").addEventListener("click", async (e) => {
@@ -674,15 +670,6 @@ export function wireChat() {
   $("open-scene").addEventListener("click", guard((e) => openScene(e.currentTarget)));
   $("go-preview").addEventListener("click", guard(() => {}));
   $("go-prompts").addEventListener("click", guard(() => {}));
-  $("open-chat-menu").addEventListener("click", guard((e) => openOverlay($("chat-menu"), { opener: e.currentTarget, anchor: e.currentTarget, focus: "[role=menuitem]" })));
-  $("chat-menu").addEventListener("click", (e) => {
-    const b = e.target.closest("[role=menuitem]");
-    if (!b) return;
-    const opener = $("open-chat-menu");
-    closeOverlay($("chat-menu"), "replace");
-    if (b.dataset.go) go(b.dataset.go);
-    else openChatSettings(opener);
-  });
   wireChatDialog();
   void showError;
 }
