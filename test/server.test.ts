@@ -125,6 +125,7 @@ describe("a scene", () => {
     const rewound = await call("POST", `/api/chats/${chat.id}/rewind`, { messageId: all[1].id });
     expect(rewound.status).toBe(200);
     expect(rewound.data.removed).toBe(2);
+    expect(rewound.data.storyRestored).toBe(true);
     expect(rewound.data.messages.map((m: any) => m.id)).toEqual([all[0].id, all[1].id]);
     // Sending again carries on from there.
     const next = await call("POST", `/api/chats/${chat.id}/send`, { content: "Three." });
@@ -133,6 +134,74 @@ describe("a scene", () => {
     const other = (await call("POST", "/api/chats", { name: "Other" })).data;
     expect((await call("POST", `/api/chats/${other.id}/rewind`, { messageId: all[0].id })).status).toBe(404);
     expect((await call("POST", `/api/chats/${chat.id}/rewind`, {})).status).toBe(400);
+  });
+
+  test("branch copies the story up to a message, with its cast, notes and blocks", async () => {
+    const { chat, cast } = await setUp();
+    await call("PATCH", `/api/chats/${chat.id}`, { offstage: [cast[2]] });
+    const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
+    const note = blocks.find((b: any) => b.title === "Right now");
+    await call("PATCH", `/api/blocks/${note.id}`, { content: "The green room." });
+    const own = (await call("POST", `/api/chats/${chat.id}/blocks`, { title: "Tone", content: "Quiet." })).data;
+    await call("PATCH", `/api/blocks/${own.id}`, { enabled: false });
+    await call("PUT", "/api/agent/files", { path: `chats/${chat.id}/notebook.md`, content: "Ada hides the wrist." });
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "One." });
+    await call("POST", `/api/chats/${chat.id}/regenerate`);
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Two." });
+    const all = (await call("GET", `/api/chats/${chat.id}`)).data.messages;
+
+    const branched = await call("POST", `/api/chats/${chat.id}/branch`, { messageId: all[1].id });
+    expect(branched.status).toBe(200);
+    const b = branched.data;
+    expect(b.chat.id).not.toBe(chat.id);
+    expect(b.chat.name).toBe("Backstage · branch");
+    expect(b.chat.cast).toEqual(cast);
+    expect(b.chat.offstage).toEqual([cast[2]]);
+    expect(b.messages.map((m: any) => m.content)).toEqual(["One.", all[1].content]);
+    expect(b.messages[1].swipes).toHaveLength(2);
+    const copied = (await call("GET", `/api/chats/${b.chat.id}/blocks`)).data;
+    expect(copied.map((x: any) => [x.kind, x.title, x.content, x.enabled])).toEqual(
+      (await call("GET", `/api/chats/${chat.id}/blocks`)).data.map((x: any) => [x.kind, x.title, x.content, x.enabled]),
+    );
+    expect((await call("GET", `/api/agent/files?path=${encodeURIComponent(`chats/${b.chat.id}/notebook.md`)}`)).data.content).toBe("Ada hides the wrist.");
+
+    // Each goes its own way: the branch's notes and messages are its own.
+    await call("PATCH", `/api/blocks/${copied.find((x: any) => x.title === "Right now").id}`, { content: "The alley." });
+    await call("POST", `/api/chats/${b.chat.id}/send`, { content: "Elsewhere." });
+    expect((await call("GET", `/api/chats/${chat.id}/blocks`)).data.find((x: any) => x.title === "Right now").content).toBe("The green room.");
+    expect((await call("GET", `/api/chats/${chat.id}`)).data.messages).toHaveLength(4);
+
+    // A second branch gets the next name; a message from another chat is refused.
+    expect((await call("POST", `/api/chats/${chat.id}/branch`, { messageId: all[0].id })).data.chat.name).toBe("Backstage · branch 2");
+    expect((await call("POST", `/api/chats/${b.chat.id}/branch`, { messageId: all[0].id })).status).toBe(404);
+  });
+
+  test("rewind and branch take the notes and cast switches back to how they stood at that message", async () => {
+    const { chat, cast } = await setUp();
+    const note = async (id: string) => (await call("GET", `/api/chats/${id}/blocks`)).data.find((b: any) => b.title === "Right now");
+    const setNote = async (id: string, content: string) => call("PATCH", `/api/blocks/${(await note(id)).id}`, { content });
+    await setNote(chat.id, "The green room.");
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "One." }); // 1, 2
+    await setNote(chat.id, "The green room, after the setlist.");
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Two." }); // 3, 4
+    await setNote(chat.id, "The alley.");
+    await call("PATCH", `/api/chats/${chat.id}`, { offstage: [cast[5]] });
+    const all = (await call("GET", `/api/chats/${chat.id}`)).data.messages;
+    expect(all.map((m: any) => m.storySaved)).toEqual([true, true, true, false]);
+
+    // Branch from reply 2: the notes as they stood then, everyone onstage.
+    const b = (await call("POST", `/api/chats/${chat.id}/branch`, { messageId: all[1].id })).data;
+    expect((await note(b.chat.id)).content).toBe("The green room, after the setlist.");
+    expect(b.chat.offstage).toEqual([]);
+    expect(b.messages.at(-1).storySaved).toBe(false);
+
+    // Rewind to reply 2: the same, in place.
+    const r = (await call("POST", `/api/chats/${chat.id}/rewind`, { messageId: all[1].id })).data;
+    expect(r.storyRestored).toBe(true);
+    expect(r.chat.offstage).toEqual([]);
+    expect((await note(chat.id)).content).toBe("The green room, after the setlist.");
+    expect(r.messages.at(-1).storySaved).toBe(false);
+
   });
 
   test("send with an empty box lets the narrator go on (or begin)", async () => {

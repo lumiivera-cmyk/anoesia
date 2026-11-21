@@ -342,6 +342,7 @@ function messageHtml(m, isLastReply) {
   const acts = `<span class="acts">
       <button type="button" class="ghost press ib act" data-act="copy" aria-label="Copy" title="Copy">${icon.copy()}</button>
       <button type="button" class="ghost press ib act" data-act="edit" aria-label="Edit" title="Edit">${icon.edit()}</button>
+      <button type="button" class="ghost press ib act" data-act="branch" aria-label="Branch from here" title="Branch from here">${icon.branch()}</button>
       ${isLast ? "" : `<button type="button" class="ghost press ib act" data-act="rewind" aria-label="Rewind to here" title="Rewind to here">${icon.rewind()}</button>`}
       <button type="button" class="ghost press ib act" data-act="delete" aria-label="Delete" title="Delete">${icon.trash()}</button>
       ${versions}${regen}
@@ -407,6 +408,7 @@ async function act(what, m, article, opener) {
     await attempt(() => api("DELETE", `/api/messages/${m.id}`));
     return refresh();
   }
+  if (what === "branch") return branchFrom(m);
   if (what === "rewind") {
     const after = state.messages.length - 1 - state.messages.indexOf(m);
     if (after < 1) return;
@@ -414,13 +416,17 @@ async function act(what, m, article, opener) {
       title: "Rewind to here?",
       body: [
         after === 1 ? "The message after this one goes for good." : `The ${after} messages after this one go for good, with all their versions.`,
-        "The chat's notes and cast stay as they are now, so check \u201cRight now\u201d if the story moved on after this point.",
+        m.storySaved
+          ? "The chat\u2019s notes and who\u2019s onstage go back to how they were at this message."
+          : "This message is from before notes were saved with each message, so the notes and cast stay as they are now. Check \u201cRight now\u201d if the story moved on after this point.",
       ],
       confirm: "rewind",
       keep: "keep them",
+      alt: "branch instead",
       icon: icon.rewind(16),
       opener,
     });
+    if (ok === "alt") return branchFrom(m);
     if (!ok) return;
     const view = await attempt(() => api("POST", `/api/chats/${state.chatId}/rewind`, { messageId: m.id }));
     if (view) await refresh();
@@ -434,6 +440,15 @@ async function act(what, m, article, opener) {
   if (what === "regen") return run("regenerate");
 }
 
+/** A new chat with this one's story up to `m` (cast, notes and blocks too), opened. */
+async function branchFrom(m) {
+  const view = await attempt(() => api("POST", `/api/chats/${state.chatId}/branch`, { messageId: m.id }));
+  if (!view) return;
+  await loadState();
+  await openChat(view.chat.id);
+  go(`#/chat/${view.chat.id}`);
+}
+
 function openMessageMenu(m, article) {
   const isLastReply = m === state.messages.at(-1) && m.role === "assistant";
   $("lifted").innerHTML = article.querySelector(".mhead").outerHTML + article.querySelector(".msg-body").innerHTML;
@@ -442,6 +457,7 @@ function openMessageMenu(m, article) {
     ["copy", icon.copy(20), "Copy"],
     ["edit", icon.edit(20), "Edit"],
     ...(isLastReply ? [["regen", icon.regen(20), "Regenerate"]] : []),
+    ["branch", icon.branch(20), "Branch from here"],
     ...(m === state.messages.at(-1) ? [] : [["rewind", icon.rewind(20), "Rewind to here"]]),
     ["delete", icon.trash(20), "Delete"],
   ];

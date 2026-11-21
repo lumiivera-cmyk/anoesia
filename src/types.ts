@@ -105,6 +105,14 @@ export interface Message {
   model: string;
   createdAt: string;
   editedAt: string | null;
+  /** Whether the chat's notes and cast switches were saved as they stood at this message (rewind and branch go back to them). */
+  storySaved: boolean;
+}
+
+/** The chat's notes (by title) and who was offstage, as they stood at a message. */
+export interface StoryState {
+  notes: Record<string, string>;
+  offstage: string[];
 }
 
 /** App-wide settings. */

@@ -420,14 +420,26 @@ export function createApp(config: Config): App {
       store.chat(p[0]!);
       return watch(p[0]!, running.get(p[0]!));
     }
+    // Branch: a new chat with this one's story up to a message (and its cast, notes and blocks).
+    if ((p = m("/api/chats/:id/branch")) && method === "POST") {
+      const chatId = p[0]!;
+      const b = await body();
+      const chat = store.branchChat(chatId, b.messageId, b.name);
+      // The chat's own agent folder (its notebook and personality) comes along too.
+      for (const f of agent.files()) {
+        const prefix = `chats/${chatId}/`;
+        if (f.path.startsWith(prefix)) agent.writeFile(`chats/${chat.id}/${f.path.slice(prefix.length)}`, f.content);
+      }
+      return json(chatView(chat.id));
+    }
     // Rewind: keep the chat up to this message, and let everything after it go.
     if ((p = m("/api/chats/:id/rewind")) && method === "POST") {
       const chatId = p[0]!;
       const b = await body();
       store.chat(chatId);
       if (running.has(chatId)) throw new ValidationError("A reply is still being written. Stop it first, then rewind.");
-      const removed = store.rewindChat(chatId, b.messageId);
-      return json({ ...chatView(chatId), removed });
+      const outcome = store.rewindChat(chatId, b.messageId);
+      return json({ ...chatView(chatId), ...outcome });
     }
     if ((p = m("/api/chats/:id/stop")) && method === "POST") {
       running.get(p[0]!)?.controller.abort();

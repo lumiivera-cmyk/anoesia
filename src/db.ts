@@ -211,6 +211,13 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE messages ADD COLUMN reasonings TEXT NOT NULL DEFAULT '[]';
   `,
+
+  // 9: the story as it stood at each message: the chat's notes and who was
+  // offstage, as JSON, saved when the next message arrives (null until then,
+  // and for messages from before this). Rewinding and branching go back to it.
+  `
+  ALTER TABLE messages ADD COLUMN story TEXT;
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */
