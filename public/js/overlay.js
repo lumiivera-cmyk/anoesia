@@ -58,7 +58,7 @@ export function closeOverlay(dialog, reason = "done") {
 }
 
 /** Put a popover next to the button that opened it (wide screens only; phones get a bottom sheet). */
-function place(dialog, anchor) {
+export function place(dialog, anchor) {
   if (matchMedia("(max-width: 899px)").matches && dialog.classList.contains("sheet-on-phone")) {
     dialog.style.left = dialog.style.top = "";
     return;

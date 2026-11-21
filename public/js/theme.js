@@ -216,7 +216,6 @@ matchMedia("(max-width: 899px)").addEventListener("change", () => {
 const SHEET = ["sheet", { extra: 0.3, blur: 10, grow: { l: 12, r: 12, b: 16 } }];
 const DIALOG_PLATES = {
   drawer: [null, ["drawer", {}]],
-  "chat-menu": [null, ["menu", { extra: 0.3 }]],
   // the lifted message and the menu under it (phone only)
   "message-menu": [null, [["#lifted", "lift", { extra: 0.3 }], ["#message-menu-items", "menu", { extra: 0.3 }]]],
   "role-menu": [null, SHEET],

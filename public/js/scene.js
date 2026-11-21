@@ -1,27 +1,53 @@
 /**
- * The scene, from the chat screen: who's onstage, and the chat's notes.
+ * The scene, from the chat screen: who's onstage, the chat's notes, and its
+ * nudges.
  *
  * Onstage, a cast member's whole card goes into the prompt; offstage, only
  * its Description, and `{{cast}}` leaves them out. On a wide screen each
  * cast chip in the header is the switch (one tap); the scene menu (the
  * "scene" button by the composer, on every screen size) has the same
  * switches plus the chat's two notes, "Right now" and "Who knows what",
- * each one tap from its editor. The notes are blocks on the prompts page
- * too: same text, two ways in.
+ * and its nudges, all written right there: each text saves itself a moment
+ * after you stop typing, when it loses focus, and when the sheet closes.
+ *
+ * A nudge is a text block sent right after your post, as you (depth 0,
+ * user role; see src/nudges.ts). The sheet lists every such block in the
+ * chat, lets you switch each on or off, rename, reword or remove it, and
+ * adds your own or a ready-made one. Notes and nudges are blocks on the
+ * prompts page too: same text, two ways in.
  */
 
 import { $, api, attempt, cardById, escapeHtml, gem, state } from "./core.js";
-import { openTextEditor } from "./editor.js";
 import { icon } from "./icons.js";
-import { openOverlay } from "./overlay.js";
+import { confirmDialog, openOverlay, place } from "./overlay.js";
 
-/** What each note is for, shown under it while it's empty. */
+/** What each note is for, shown in it while it's empty. */
 const NOTE_HINTS = {
   "Right now": "where the story stands",
   "Who knows what": "one line per secret",
 };
 
-let notes = [];
+/** The ready-made nudges (src/nudges.ts), offered while the chat doesn't have one by that name. */
+const PRESETS = [
+  { preset: "pace", title: "Match my pace", label: "match my pace" },
+  { preset: "restraint", title: "Scene restraint", label: "scene restraint" },
+];
+
+/** This chat's notes and nudges, as the server last saved them. */
+let blocks = [];
+/** The button the scene opened from: on a wide screen the menu sits by it, and moves as it grows. */
+let anchor = null;
+
+/** How long after the last keystroke a text saves. */
+const SAVE_AFTER_MS = 700;
+/** Per "block id:field": the pending save timer, and the save in flight (so saves never overlap). */
+const timers = new Map();
+const inflight = new Map();
+
+const isNudge = (b) => b.kind === "text" && b.role === "user" && b.depth === 0;
+const notes = () => blocks.filter((b) => b.kind === "note");
+const nudges = () => blocks.filter(isNudge);
+const menu = () => $("scene-menu");
 
 export const isOffstage = (cardId) => Boolean(state.chat?.offstage?.includes(cardId));
 
@@ -48,14 +74,34 @@ export function stageLine(cardId) {
 
 export async function openScene(opener) {
   if (!state.chat) return;
-  const blocks = await attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`));
-  if (!blocks) return;
-  notes = blocks.filter((b) => b.kind === "note");
+  await flushAll();
+  if (!(await reload())) return;
+  anchor = opener;
+  menu().replaceChildren(); // fresh from the server, not what an earlier visit left typed
   render();
-  openOverlay($("scene-menu"), { opener, anchor: opener, focus: "[data-stage], [data-note]" });
+  openOverlay(menu(), { opener, anchor: opener, focus: "[data-stage], [data-text]", onClose: () => void flushAll() });
+  fit();
 }
 
+async function reload() {
+  const all = await attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`));
+  if (!all) return false;
+  blocks = all.filter((b) => b.kind === "note" || isNudge(b));
+  return true;
+}
+
+/** Size every text to what's in it, then put the menu back by its button (its height changed). */
+function fit() {
+  for (const area of menu().querySelectorAll("textarea")) autosize(area);
+  if (anchor?.isConnected && menu().open) place(menu(), anchor);
+}
+
+const saved = (id) => `<span class="sc-saved" data-saved="${id}" aria-live="polite"></span>`;
+
 function render() {
+  // A redraw keeps whatever is typed, saved or not.
+  const typed = new Map([...menu().querySelectorAll("[data-text]")].map((a) => [a.dataset.text, a.value]));
+  const value = (b, field) => typed.get(`${b.id}:${field}`) ?? b[field];
   const cast = (state.chat?.cast ?? []).map(cardById).filter(Boolean);
   const castRows = cast
     .map(
@@ -63,55 +109,158 @@ function render() {
         <button type="button" role="switch" class="switch" aria-checked="${!isOffstage(c.id)}" aria-label="${escapeHtml(c.name)} onstage" data-stage="${c.id}"><span class="knob"></span></button></li>`,
     )
     .join("");
-  const noteRows = notes
+  const noteRows = notes()
     .map((n) => {
-      const text = n.content.trim();
-      const line = text ? escapeHtml(text.split("\n")[0]) : `<span class="faint">empty · ${NOTE_HINTS[n.title] ?? "not sent"}</span>`;
-      return `<li><button type="button" class="sc-note press" data-note="${n.id}">
-        <span class="sc-text"><span class="sc-n">${escapeHtml(n.title)}${n.enabled ? "" : ' <span class="chip-you">· switched off</span>'}</span><span class="sc-line">${line}</span></span>${icon.edit(18)}</button></li>`;
+      const hint = NOTE_HINTS[n.title] ?? "this chat only";
+      return `<li class="sc-note"><span class="sc-note-head"><label class="sc-n" for="sc-${n.id}">${escapeHtml(n.title)}${n.enabled ? "" : ' <span class="chip-you">· switched off</span>'}</label>${saved(n.id)}</span>
+        <textarea class="sunk" id="sc-${n.id}" data-text="${n.id}:content" rows="2" placeholder="${escapeHtml(hint)} · empty isn't sent">${escapeHtml(value(n, "content"))}</textarea></li>`;
     })
     .join("");
-  $("scene-menu").innerHTML = `
+  const nudgeRows = nudges()
+    .map((n) => {
+      const title = value(n, "title");
+      return `<li class="sc-note sc-nudge${n.enabled ? "" : " is-off"}"><span class="sc-note-head">
+          <input class="sc-title" id="sc-t-${n.id}" data-text="${n.id}:title" value="${escapeHtml(title)}" aria-label="Nudge name" maxlength="200" />${saved(n.id)}
+          <button type="button" class="ghost press ib sc-del" data-remove="${n.id}" aria-label="Remove ${escapeHtml(title)}" title="Remove">${icon.trash(18)}</button>
+          <button type="button" role="switch" class="switch" aria-checked="${n.enabled}" aria-label="${escapeHtml(title)} on" data-enable="${n.id}"><span class="knob"></span></button></span>
+        <textarea class="sunk" id="sc-${n.id}" data-text="${n.id}:content" rows="2" aria-label="${escapeHtml(title)} text" placeholder="what the narrator should keep in mind next · empty isn't sent">${escapeHtml(value(n, "content"))}</textarea></li>`;
+    })
+    .join("");
+  const have = new Set(nudges().map((n) => n.title));
+  const presetButtons = PRESETS.filter((p) => !have.has(p.title))
+    .map((p) => `<button type="button" class="raised press btn" data-preset="${p.preset}">${icon.plus(16)}${p.label}</button>`)
+    .join("");
+  // Only the body is redrawn: in selenite the sheet's plate lives in the dialog beside it.
+  let body = menu().querySelector(":scope > .sc-body");
+  if (!body) menu().append((body = Object.assign(document.createElement("div"), { className: "sc-body" })));
+  body.innerHTML = `
     <div class="menu-head"><span class="mh-t" id="scene-title">This scene</span><span class="meta">${escapeHtml(state.chat.name)}</span></div>
     <h3 class="eyebrow sc-h" id="sc-cast-h">On stage</h3>
     <ul class="sc-list" aria-labelledby="sc-cast-h">${castRows || `<li class="meta sc-empty">No cast yet. Add cards in chat settings.</li>`}</ul>
     <h3 class="eyebrow sc-h" id="sc-notes-h">Notes <span class="meta">sent when they have text</span></h3>
-    <ul class="sc-list" aria-labelledby="sc-notes-h">${noteRows}</ul>`;
+    <ul class="sc-list" aria-labelledby="sc-notes-h">${noteRows}</ul>
+    <h3 class="eyebrow sc-h" id="sc-nudges-h">Nudges <span class="meta">sent right after your post, as you</span></h3>
+    <ul class="sc-list" aria-labelledby="sc-nudges-h">${nudgeRows || `<li class="meta sc-empty">None in this chat.</li>`}</ul>
+    <div class="sc-add"><button type="button" class="raised press btn" data-new-nudge>${icon.plus(16)}your own</button>${presetButtons}</div>`;
+}
+
+/** Redraw, size the texts, and put focus on `selector` (the control that was used, or what replaced it). */
+function redraw(selector) {
+  render();
+  fit();
+  if (selector) menu().querySelector(selector)?.focus();
 }
 
 async function onClick(e) {
   const sw = e.target.closest("[data-stage]");
   if (sw) {
     const id = sw.dataset.stage;
-    if (await toggleStage(id)) {
-      render();
-      $("scene-menu").querySelector(`[data-stage="${CSS.escape(id)}"]`)?.focus();
-    }
+    if (await toggleStage(id)) redraw(`[data-stage="${CSS.escape(id)}"]`);
     return;
   }
-  const row = e.target.closest("[data-note]");
-  if (row) {
-    const note = notes.find((n) => n.id === row.dataset.note);
-    if (!note) return;
-    openTextEditor({
-      title: note.title,
-      sub: `${state.chat.name}'s note · ${NOTE_HINTS[note.title] ?? "this chat only"}`,
-      text: note.content,
-      label: `${note.title} text`,
-      note: "This chat only. An empty note isn't sent.",
-      opener: row,
-      onSave: async (text) => {
-        const saved = await attempt(() => api("PATCH", `/api/blocks/${note.id}`, { content: text }));
-        if (!saved) return false;
-        notes = notes.map((n) => (n.id === saved.id ? saved : n));
-        if ($("scene-menu").open) render();
-        return true;
-      },
-    });
+  const on = e.target.closest("[data-enable]");
+  if (on) {
+    const id = on.dataset.enable;
+    const block = blocks.find((b) => b.id === id);
+    const done = block && (await attempt(() => api("PATCH", `/api/blocks/${id}`, { enabled: !block.enabled })));
+    if (!done) return;
+    blocks = blocks.map((b) => (b.id === id ? { ...b, enabled: done.enabled } : b));
+    redraw(`[data-enable="${CSS.escape(id)}"]`);
+    return;
   }
+  const rm = e.target.closest("[data-remove]");
+  if (rm) {
+    const id = rm.dataset.remove;
+    const area = menu().querySelector(`[data-text="${CSS.escape(id)}:content"]`);
+    const title = menu().querySelector(`[data-text="${CSS.escape(id)}:title"]`)?.value || "this nudge";
+    // An empty nudge goes at once; one with words in it asks first.
+    if (area?.value.trim() && !(await confirmDialog({ title: `Remove ${title}?`, body: "It goes from this chat's prompt, here and on the prompts page.", confirm: "remove", opener: rm }))) return;
+    for (const key of [`${id}:title`, `${id}:content`]) clearTimeout(timers.get(key)), timers.delete(key);
+    await Promise.all([inflight.get(`${id}:title`), inflight.get(`${id}:content`)]);
+    if (!(await attempt(() => api("DELETE", `/api/blocks/${id}`)))) return;
+    blocks = blocks.filter((b) => b.id !== id);
+    redraw("[data-new-nudge]");
+    return;
+  }
+  const add = e.target.closest("[data-new-nudge], [data-preset]");
+  if (add) {
+    const body = add.dataset.preset ? { preset: add.dataset.preset } : { title: "Nudge", content: "", role: "user", depth: 0 };
+    const made = await attempt(() => api("POST", `/api/chats/${state.chatId}/blocks`, body));
+    if (!made) return;
+    blocks = [...blocks, made];
+    redraw(add.dataset.preset ? "[data-new-nudge]" : `[data-text="${CSS.escape(made.id)}:content"]`);
+    menu().querySelector(`[data-text="${CSS.escape(made.id)}:content"]`)?.scrollIntoView({ block: "nearest" });
+  }
+}
+
+// ---------------------------------------------------------------- texts written in place
+
+function autosize(area) {
+  area.style.height = "auto";
+  area.style.height = `${area.scrollHeight + 2}px`;
+}
+
+/** "saving…", "saved" and so on, by the block's name. */
+function showSaved(key, text) {
+  const el = menu().querySelector(`[data-saved="${CSS.escape(key.split(":")[0])}"]`);
+  if (el) el.textContent = text;
+}
+
+function onInput(e) {
+  const box = e.target.closest("[data-text]");
+  if (!box) return;
+  if (box.tagName === "TEXTAREA") {
+    const before = box.offsetHeight;
+    autosize(box);
+    if (box.offsetHeight !== before && anchor?.isConnected) place(menu(), anchor);
+  }
+  const key = box.dataset.text;
+  showSaved(key, "");
+  clearTimeout(timers.get(key));
+  timers.set(key, setTimeout(() => void save(key, box.value), SAVE_AFTER_MS));
+}
+
+/** Save one text ("block id:content" or "block id:title"), if it changed. Waits for an earlier save of the same text first. */
+async function save(key, text) {
+  clearTimeout(timers.get(key));
+  timers.delete(key);
+  const [id, field] = key.split(":");
+  const before = inflight.get(key);
+  const run = (async () => {
+    await before;
+    const block = blocks.find((b) => b.id === id);
+    if (!block) return;
+    const value = field === "title" ? text.trim() : text;
+    if (field === "title" && !value) return showSaved(key, "needs a name");
+    if (block[field] === value) return showSaved(key, "");
+    showSaved(key, "saving…");
+    const done = await attempt(() => api("PATCH", `/api/blocks/${id}`, { [field]: value }));
+    if (!done) return showSaved(key, "not saved");
+    blocks = blocks.map((b) => (b.id === id ? { ...b, [field]: done[field] } : b));
+    showSaved(key, "saved");
+  })();
+  inflight.set(key, run);
+  await run;
+  if (inflight.get(key) === run) inflight.delete(key);
+}
+
+/** Save whatever is still waiting: when a text loses focus, and when the sheet closes. */
+function flushAll() {
+  const pending = [];
+  for (const box of menu().querySelectorAll("[data-text]")) {
+    if (timers.has(box.dataset.text)) pending.push(save(box.dataset.text, box.value));
+  }
+  return Promise.all([...pending, ...inflight.values()]);
 }
 
 export function wireScene() {
   $("open-scene").insertAdjacentHTML("afterbegin", icon.text(18));
-  $("scene-menu").addEventListener("click", onClick);
+  menu().addEventListener("click", onClick);
+  menu().addEventListener("input", onInput);
+  menu().addEventListener("focusout", (e) => {
+    const box = e.target.closest?.("[data-text]");
+    if (box && timers.has(box.dataset.text)) void save(box.dataset.text, box.value);
+  });
+  // Leaving the page with a text still waiting: send it anyway.
+  addEventListener("pagehide", () => void flushAll());
 }
