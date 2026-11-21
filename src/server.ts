@@ -420,6 +420,15 @@ export function createApp(config: Config): App {
       store.chat(p[0]!);
       return watch(p[0]!, running.get(p[0]!));
     }
+    // Rewind: keep the chat up to this message, and let everything after it go.
+    if ((p = m("/api/chats/:id/rewind")) && method === "POST") {
+      const chatId = p[0]!;
+      const b = await body();
+      store.chat(chatId);
+      if (running.has(chatId)) throw new ValidationError("A reply is still being written. Stop it first, then rewind.");
+      const removed = store.rewindChat(chatId, b.messageId);
+      return json({ ...chatView(chatId), removed });
+    }
     if ((p = m("/api/chats/:id/stop")) && method === "POST") {
       running.get(p[0]!)?.controller.abort();
       return json({ ok: true });

@@ -116,6 +116,25 @@ describe("a scene", () => {
     expect(view.data.messages).toHaveLength(1);
   });
 
+  test("rewind keeps the chat up to a message and lets the rest go", async () => {
+    const { chat } = await setUp();
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "One." });
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Two." });
+    const all = (await call("GET", `/api/chats/${chat.id}`)).data.messages;
+    expect(all).toHaveLength(4);
+    const rewound = await call("POST", `/api/chats/${chat.id}/rewind`, { messageId: all[1].id });
+    expect(rewound.status).toBe(200);
+    expect(rewound.data.removed).toBe(2);
+    expect(rewound.data.messages.map((m: any) => m.id)).toEqual([all[0].id, all[1].id]);
+    // Sending again carries on from there.
+    const next = await call("POST", `/api/chats/${chat.id}/send`, { content: "Three." });
+    expect(next.data.messages).toHaveLength(4);
+    // A message from another chat, or none at all, is refused.
+    const other = (await call("POST", "/api/chats", { name: "Other" })).data;
+    expect((await call("POST", `/api/chats/${other.id}/rewind`, { messageId: all[0].id })).status).toBe(404);
+    expect((await call("POST", `/api/chats/${chat.id}/rewind`, {})).status).toBe(400);
+  });
+
   test("send with an empty box lets the narrator go on (or begin)", async () => {
     const { chat } = await setUp();
     const sent = await call("POST", `/api/chats/${chat.id}/send`, { content: "" });
