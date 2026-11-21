@@ -75,7 +75,7 @@ function place(dialog, anchor) {
 }
 
 /** A small confirmation: resolves true when the confirming button is pressed. */
-export function confirmDialog({ title, body, confirm, keep = "keep it", danger = true, opener, icon = null }) {
+export function confirmDialog({ title, body, confirm, keep = "keep it", danger = true, opener, icon = null, alt = null }) {
   const dialog = document.getElementById("confirm-dialog");
   // The confirm button's icon: a bin unless the caller brings its own (an SVG string).
   const mark = dialog.querySelector("#confirm-icon");
@@ -86,6 +86,10 @@ export function confirmDialog({ title, body, confirm, keep = "keep it", danger =
   desc.replaceChildren(...[body].flat().map((t) => Object.assign(document.createElement("p"), { textContent: t })));
   const yes = dialog.querySelector("[data-confirm]");
   const no = dialog.querySelector("[data-keep]");
+  // A third way out (say, "branch instead"): resolves to "alt".
+  const other = dialog.querySelector("[data-alt]");
+  other.hidden = !alt;
+  other.textContent = alt ?? "";
   yes.lastChild.textContent = confirm;
   yes.className = `btn ${danger ? "btn-danger" : "btn-primary"} press`;
   no.textContent = keep;
@@ -95,15 +99,21 @@ export function confirmDialog({ title, body, confirm, keep = "keep it", danger =
       ok = true;
       closeOverlay(dialog);
     };
+    const onAlt = () => {
+      ok = "alt";
+      closeOverlay(dialog);
+    };
     const onNo = () => closeOverlay(dialog);
     yes.addEventListener("click", onYes);
     no.addEventListener("click", onNo);
+    other.addEventListener("click", onAlt);
     openOverlay(dialog, {
       opener,
       focus: "[data-keep]",
       onClose: () => {
         yes.removeEventListener("click", onYes);
         no.removeEventListener("click", onNo);
+        other.removeEventListener("click", onAlt);
         resolve(ok);
       },
     });

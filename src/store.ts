@@ -622,6 +622,39 @@ export class Store {
   }
 
   /**
+   * Branch a chat at one of its messages: a new chat with the messages up to
+   * and including it (every version of each), the same cast on and off
+   * stage, its own copy of the prompt blocks (notes included, as they are
+   * now) and the chat's macro variables. The original is left as it was.
+   */
+  branchChat(chatId: string, messageId: unknown, rawName?: unknown): Chat {
+    if (typeof messageId !== "string") throw new ValidationError("Say which message to branch from.");
+    const from = this.chat(chatId);
+    const m = this.message(messageId);
+    if (m.chatId !== chatId) throw new NotFoundError("message");
+    const seq = (this.db.query("SELECT seq FROM messages WHERE id = ?").get(messageId) as { seq: number }).seq;
+    const name = rawName === undefined || rawName === "" ? branchName(from.name, this.chats().map((c) => c.name)) : cleanName(rawName);
+    const id = newId();
+    const at = now();
+    this.db.transaction(() => {
+      this.db.query("INSERT INTO chats (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, at, at);
+      this.db.query("INSERT INTO chat_cast (chat_id, card_id, position, onstage) SELECT ?, card_id, position, onstage FROM chat_cast WHERE chat_id = ?").run(id, chatId);
+      const blocks = this.db.query("SELECT * FROM prompt_blocks WHERE chat_id = ? ORDER BY position").all(chatId) as Row[];
+      const insertBlock = this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, card_id, field_id, title, content, role, enabled, depth, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const b of blocks) insertBlock.run(newId(), id, b.kind as string, (b.card_id as string | null) ?? null, (b.field_id as string | null) ?? null, b.title as string, b.content as string, b.role as string, b.enabled as number, (b.depth as number | null) ?? null, b.position as number);
+      this.db.query("INSERT INTO macro_vars (scope, key, value) SELECT ?, key, value FROM macro_vars WHERE scope = ?").run(id, chatId);
+      const messages = this.db.query("SELECT * FROM messages WHERE chat_id = ? AND seq <= ? ORDER BY seq").all(chatId, seq) as Row[];
+      const insertMessage = this.db.query(
+        "INSERT INTO messages (id, chat_id, seq, role, author, swipes, reasonings, swipe_index, profile_id, model, created_at, edited_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      );
+      for (const r of messages) {
+        insertMessage.run(newId(), id, r.seq as number, r.role as string, r.author as string, r.swipes as string, r.reasonings as string, r.swipe_index as number, r.profile_id as string, r.model as string, r.created_at as string, (r.edited_at as string | null) ?? null);
+      }
+    })();
+    return this.chat(id);
+  }
+
+  /**
    * Rewind a chat to one of its messages: every message after it goes, for
    * good. The message itself stays, and so do the chat's notes, cast and
    * blocks (they aren't kept per message). Returns how many went.
@@ -725,6 +758,15 @@ function checkRole(value: unknown): PromptBlock["role"] {
 }
 
 // ---------------------------------------------------------- validation
+
+/** "Name · branch", or "Name · branch 2" and on when that's taken. A branch of a branch counts on from its own name. */
+function branchName(name: string, taken: string[]): string {
+  const base = `${name.replace(/ · branch(?: \d+)?$/, "")} · branch`;
+  if (!taken.includes(base)) return base.slice(0, 200);
+  let n = 2;
+  while (taken.includes(`${base} ${n}`)) n++;
+  return `${base} ${n}`.slice(0, 200);
+}
 
 function cleanName(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") throw new ValidationError("A name is required.");

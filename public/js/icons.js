@@ -27,6 +27,7 @@ export const icon = {
   right: (s = 16) => svg(s, '<path d="M9 6l6 6-6 6"/>', { width: 2 }),
   down: (s = 18) => svg(s, '<path d="M6 9l6 6 6-6"/>', { width: 2 }),
   caret: () => svg(10, '<path d="M6 9l6 6 6-6"/>', { width: 3 }),
+  branch: (s = 17) => svg(s, '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-6 4-10.5 8.5"/>'),
   rewind: (s = 17) => svg(s, '<path d="M11 6l-6 6 6 6M19 6l-6 6 6 6"/>'),
   regen: (s = 17) => svg(s, '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>', { stroke: "#8FD2FF" }),
   send: (s = 20) => svg(s, '<path d="M4 12l16-8-6 16-2.5-6.5Z"/>', { stroke: "#062A44", width: 2 }),
