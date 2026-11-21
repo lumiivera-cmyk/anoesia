@@ -416,7 +416,9 @@ async function act(what, m, article, opener) {
       title: "Rewind to here?",
       body: [
         after === 1 ? "The message after this one goes for good." : `The ${after} messages after this one go for good, with all their versions.`,
-        "The chat's notes and cast stay as they are now, so check \u201cRight now\u201d if the story moved on after this point.",
+        m.storySaved
+          ? "The chat\u2019s notes and who\u2019s onstage go back to how they were at this message."
+          : "This message is from before notes were saved with each message, so the notes and cast stay as they are now. Check \u201cRight now\u201d if the story moved on after this point.",
       ],
       confirm: "rewind",
       keep: "keep them",

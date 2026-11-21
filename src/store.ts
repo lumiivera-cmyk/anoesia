@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_FIELDS, type ParsedCard } from "./cards.ts";
 import { NotFoundError, ValidationError, newId } from "./errors.ts";
 import { CHAT_NOTES, DEFAULT_MAIN_PROMPT } from "./prompt.ts";
-import type { Background, BlockKind, Card, CardField, Chat, FieldKey, Finish, Message, Photo, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
+import type { Background, BlockKind, StoryState, Card, CardField, Chat, FieldKey, Finish, Message, Photo, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
 
 const now = () => new Date().toISOString();
 
@@ -582,6 +582,8 @@ export class Store {
     this.chat(input.chatId);
     const id = newId();
     const seq = (this.db.query("SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM messages WHERE chat_id = ?").get(input.chatId) as { n: number }).n;
+    // The message before this one keeps the story as it stood when it was the latest.
+    this.db.query("UPDATE messages SET story = ? WHERE chat_id = ? AND seq = (SELECT MAX(seq) FROM messages WHERE chat_id = ?)").run(JSON.stringify(this.storyNow(input.chatId)), input.chatId, input.chatId);
     this.db
       .query("INSERT INTO messages (id, chat_id, seq, role, author, swipes, reasonings, swipe_index, profile_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)")
       .run(id, input.chatId, seq, input.role, input.author, JSON.stringify([input.content]), JSON.stringify([input.reasoning ?? ""]), input.profileId ?? "", input.model ?? "", now());
@@ -621,6 +623,33 @@ export class Store {
     return this.message(id);
   }
 
+  /** The chat's notes and who's offstage, as they are now. */
+  private storyNow(chatId: string): StoryState {
+    const notes = this.db.query("SELECT title, content FROM prompt_blocks WHERE chat_id = ? AND kind = 'note'").all(chatId) as { title: string; content: string }[];
+    return { notes: Object.fromEntries(notes.map((n) => [n.title, n.content])), offstage: this.chat(chatId).offstage };
+  }
+
+  /** The story saved at a message, or null (it's the latest, or from before stories were saved). */
+  private storyAt(messageId: string): StoryState | null {
+    const row = this.db.query("SELECT story FROM messages WHERE id = ?").get(messageId) as { story: string | null } | null;
+    if (!row?.story) return null;
+    try {
+      const parsed = JSON.parse(row.story) as StoryState;
+      return { notes: parsed.notes ?? {}, offstage: Array.isArray(parsed.offstage) ? parsed.offstage : [] };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Put a chat's notes and cast switches back to a saved story (cast members no longer in the cast are skipped). */
+  private restoreStory(chatId: string, story: StoryState): void {
+    this.blocks(chatId); // makes sure both notes exist
+    const update = this.db.query("UPDATE prompt_blocks SET content = ? WHERE chat_id = ? AND kind = 'note' AND title = ?");
+    for (const [title, content] of Object.entries(story.notes)) update.run(content, chatId, title);
+    const cast = this.chat(chatId).cast;
+    this.setOffstage(chatId, story.offstage.filter((id) => cast.includes(id)));
+  }
+
   /**
    * Branch a chat at one of its messages: a new chat with the messages up to
    * and including it (every version of each), the same cast on and off
@@ -645,28 +674,42 @@ export class Store {
       this.db.query("INSERT INTO macro_vars (scope, key, value) SELECT ?, key, value FROM macro_vars WHERE scope = ?").run(id, chatId);
       const messages = this.db.query("SELECT * FROM messages WHERE chat_id = ? AND seq <= ? ORDER BY seq").all(chatId, seq) as Row[];
       const insertMessage = this.db.query(
-        "INSERT INTO messages (id, chat_id, seq, role, author, swipes, reasonings, swipe_index, profile_id, model, created_at, edited_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, chat_id, seq, role, author, swipes, reasonings, swipe_index, profile_id, model, created_at, edited_at, story) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const r of messages) {
-        insertMessage.run(newId(), id, r.seq as number, r.role as string, r.author as string, r.swipes as string, r.reasonings as string, r.swipe_index as number, r.profile_id as string, r.model as string, r.created_at as string, (r.edited_at as string | null) ?? null);
+        // The branch's last message is its latest: its story is the branch's own notes now.
+        const story = r.seq === seq ? null : ((r.story as string | null) ?? null);
+        insertMessage.run(newId(), id, r.seq as number, r.role as string, r.author as string, r.swipes as string, r.reasonings as string, r.swipe_index as number, r.profile_id as string, r.model as string, r.created_at as string, (r.edited_at as string | null) ?? null, story);
       }
+      // Copied as they are now; then, if they were saved at that message, as they stood there.
+      const story = this.storyAt(messageId);
+      if (story) this.restoreStory(id, story);
     })();
     return this.chat(id);
   }
 
   /**
    * Rewind a chat to one of its messages: every message after it goes, for
-   * good. The message itself stays, and so do the chat's notes, cast and
-   * blocks (they aren't kept per message). Returns how many went.
+   * good. The message itself stays. The chat's notes and who's offstage go
+   * back to how they stood at that message, when they were saved there
+   * (messages from before they were saved leave them as they are). Returns
+   * how many went, and whether the story went back too.
    */
-  rewindChat(chatId: string, messageId: unknown): number {
+  rewindChat(chatId: string, messageId: unknown): { removed: number; storyRestored: boolean } {
     if (typeof messageId !== "string") throw new ValidationError("Say which message to rewind to.");
     const m = this.message(messageId);
     if (m.chatId !== chatId) throw new NotFoundError("message");
     const seq = (this.db.query("SELECT seq FROM messages WHERE id = ?").get(messageId) as { seq: number }).seq;
-    const gone = this.db.query("DELETE FROM messages WHERE chat_id = ? AND seq > ?").run(chatId, seq).changes;
-    if (gone) this.touch(chatId);
-    return gone;
+    const story = this.storyAt(messageId);
+    let removed = 0;
+    this.db.transaction(() => {
+      removed = this.db.query("DELETE FROM messages WHERE chat_id = ? AND seq > ?").run(chatId, seq).changes;
+      if (story && removed) this.restoreStory(chatId, story);
+      // It's the latest again: its story is the chat's own notes from here on.
+      this.db.query("UPDATE messages SET story = NULL WHERE id = ?").run(messageId);
+    })();
+    if (removed) this.touch(chatId);
+    return { removed, storyRestored: Boolean(story && removed) };
   }
 
   deleteMessage(id: string): void {
@@ -729,6 +772,7 @@ function toMessage(r: Row): Message {
     model: r.model as string,
     createdAt: r.created_at as string,
     editedAt: (r.edited_at as string | null) ?? null,
+    storySaved: Boolean(r.story),
   };
 }
 

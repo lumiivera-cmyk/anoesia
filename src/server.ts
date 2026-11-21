@@ -438,8 +438,8 @@ export function createApp(config: Config): App {
       const b = await body();
       store.chat(chatId);
       if (running.has(chatId)) throw new ValidationError("A reply is still being written. Stop it first, then rewind.");
-      const removed = store.rewindChat(chatId, b.messageId);
-      return json({ ...chatView(chatId), removed });
+      const outcome = store.rewindChat(chatId, b.messageId);
+      return json({ ...chatView(chatId), ...outcome });
     }
     if ((p = m("/api/chats/:id/stop")) && method === "POST") {
       running.get(p[0]!)?.controller.abort();
