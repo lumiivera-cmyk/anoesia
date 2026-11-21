@@ -127,6 +127,13 @@ export interface CompletionRequest {
    * signal fires, the request is abandoned and `CancelledError` is thrown.
    */
   signal?: AbortSignal;
+  /**
+   * Streaming: this model has been seen sending its reply as "reasoning"
+   * too (see `echoes`). While only reasoning has arrived, show it as the
+   * reply's text, not in the thinking fold; the end corrects it if it was
+   * real reasoning after all.
+   */
+  reasoningEchoes?: boolean;
 }
 
 /** A successful generation. */
@@ -145,6 +152,11 @@ export interface CompletionResult {
    * "" when there was none (most models, or a provider that hides it).
    */
   reasoning: string;
+  /**
+   * Streaming: whether the reasoning field only repeated the reply (true),
+   * carried real reasoning (false), or was empty (left out).
+   */
+  reasoningEchoed?: boolean;
 }
 
 /**
@@ -335,7 +347,7 @@ export async function streamChatCompletion(
     }
 
     const acc: StreamAcc = { raw: "", fieldReasoning: "", detailsReasoning: "", model: "", finishReason: null, fields: new Set<string>() };
-    const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning, acc.detailsReasoning);
+    const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning, acc.detailsReasoning, request.reasoningEchoes);
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -367,6 +379,8 @@ export async function streamChatCompletion(
     }
 
     const final = live();
+    const field = acc.fieldReasoning.trim();
+    const reasoningEchoed = field ? echoes(field, final.content) || (!final.content && Boolean(request.reasoningEchoes)) : undefined;
     if (!final.content && !request.allowEmpty) {
       throw new ApiError(
         acc.finishReason === "length"
@@ -381,7 +395,7 @@ export async function streamChatCompletion(
     console.log(
       `${providerName(target)} reply: ${acc.model || request.model}${asked}; ${final.reasoning.length} characters of reasoning, ${final.content.length} of text${echoed ? " (a reasoning field only repeated the text, so it was dropped)" : ""}; fields seen: ${[...acc.fields].join(", ") || "none"}${refusals.length ? `; Google said: ${refusals.join(" | ")}` : ""}`,
     );
-    return { content: final.content, toolCalls: [], model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning };
+    return { content: final.content, toolCalls: [], model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning, ...(reasoningEchoed === undefined ? {} : { reasoningEchoed }) };
   } catch (error) {
     throw fail(error);
   } finally {
@@ -482,8 +496,13 @@ function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
  * tag half arrived at the very end is held back, so it never flashes up as
  * text.
  */
-export function liveReply(raw: string, fieldReasoning: string, detailsReasoning = ""): LiveReply {
+export function liveReply(raw: string, fieldReasoning: string, detailsReasoning = "", echoMode = false): LiveReply {
   const parts = thinkParts(raw.replace(/<\/?(t(h(i(n(k)?)?|o(u(g(h(t)?)?)?)?)?)?)?$/i, ""));
+  // A model known to send its reply as reasoning, with no text yet: that "reasoning" is the reply arriving.
+  if (echoMode && !parts.rest && fieldReasoning.trim()) {
+    const other = [detailsReasoning, parts.reasoning.join("\n\n")].map((r) => r.trim()).find(Boolean) ?? "";
+    return { reasoning: other, content: fieldReasoning.trim() };
+  }
   // The first that has something and isn't the reply again: the reasoning field, its details, then <think> text.
   const reasoning = [fieldReasoning, detailsReasoning, parts.reasoning.join("\n\n")].map((r) => r.trim()).find((r) => r && !echoes(r, parts.rest)) ?? "";
   return { reasoning, content: parts.rest };
