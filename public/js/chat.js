@@ -325,6 +325,13 @@ function versionsHtml(m) {
   </span>`;
 }
 
+/** Whether a saved "reasoning" is only the reply again (some providers sent that before it was caught; see src/nanogpt.ts echoes). */
+function echoes(reasoning, content) {
+  const r = reasoning.replace(/\s+/g, " ").trim();
+  const c = content.replace(/\s+/g, " ").trim();
+  return Boolean(r && c) && (c.startsWith(r) || r.startsWith(c));
+}
+
 function messageHtml(m, isLastReply) {
   const you = m.role === "user";
   const persona = personaOf(state.chat);
@@ -345,7 +352,7 @@ function messageHtml(m, isLastReply) {
     : `<div class="mhead"><span class="eyebrow">Narrator</span><span class="meta">${escapeHtml(meta)}</span>${acts}</div>`;
   // On a phone the last reply keeps its versions and regenerate under it; a tap on any message opens the rest.
   const phoneRow = !you && (isLastReply || versions) ? `<div class="phone-row">${versions}${regen}${isLastReply ? `<span class="meta">tap a message for more</span>` : ""}</div>` : "";
-  const thinking = !you && m.reasoning ? `<details class="thinking"><summary>${icon.right(14)}<span>reasoning</span></summary><div class="thinking-body">${formatText(m.reasoning)}</div></details>` : "";
+  const thinking = !you && m.reasoning && !echoes(m.reasoning, m.content) ? `<details class="thinking"><summary>${icon.right(14)}<span>reasoning</span></summary><div class="thinking-body">${formatText(m.reasoning)}</div></details>` : "";
   return `<article class="msg ${you ? "you sunk" : "narrator"}" data-id="${m.id}" aria-label="${escapeHtml(label)}">
     ${head}
     ${thinking}
