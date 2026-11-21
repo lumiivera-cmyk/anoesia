@@ -531,6 +531,13 @@ describe("streaming a reply", () => {
     expect(first).toMatchObject({ content: "Ada looks up.", reasoning: "She is tired; keep it short." });
   });
 
+  test("a reasoning field that only repeats the reply isn't kept as reasoning", async () => {
+    const { chat } = await setUp();
+    streams([{ reasoning: "Ada looks up.", content: "Ada looks up." }]);
+    const done = (await events(await app.fetch(new Request(`http://127.0.0.1/api/chats/${chat.id}/send?stream=1`, { method: "POST", body: "{}" })))).at(-1);
+    expect(done.messages.at(-1)).toMatchObject({ content: "Ada looks up.", reasoning: "" });
+  });
+
   test("<think> tags split live: reasoning first, then the text", async () => {
     const { chat } = await setUp();
     streams([{ content: "<thi" }, { content: "nk>Plan" }, { content: " it.</th" }, { content: "ink>Hello" }]);

@@ -233,6 +233,7 @@ function readCompletion(json: unknown, target: ApiOptions, request: CompletionRe
   }
 
   const content = typeof rawContent === "string" ? stripReasoning(rawContent) : "";
+  const reasoning = readReasoning(choice?.message, typeof rawContent === "string" ? rawContent : "");
   if (content === "" && toolCalls.length === 0 && !request.allowEmpty) {
     throw new ApiError(
       choice?.finish_reason === "length"
@@ -246,7 +247,7 @@ function readCompletion(json: unknown, target: ApiOptions, request: CompletionRe
     toolCalls,
     model: typeof (json as { model?: unknown }).model === "string" ? (json as { model: string }).model : request.model,
     finishReason: choice?.finish_reason ?? null,
-    reasoning: readReasoning(choice?.message, typeof rawContent === "string" ? rawContent : ""),
+    reasoning: echoes(reasoning, content) ? "" : reasoning,
   };
 }
 
@@ -290,25 +291,28 @@ export async function streamChatCompletion(
   };
 
   const plain = { ...requestBody(request), stream: true };
-  const withThoughts = target.provider === "vertex" ? askForThoughts(plain, request) : null;
-  let response: Response;
-  let idle: Idle;
+  // Vertex AI: ask Gemini for its thoughts, in the forms Google may take, best first (see `thoughtsBodies`).
+  const tries = target.provider === "vertex" ? [...thoughtsBodies(plain, request), plain] : [plain];
+  /** What happened to the thoughts request, for the server's log (Vertex AI only). */
+  const refusals: string[] = [];
+  let response!: Response;
+  let idle!: Idle;
   try {
-    ({ response, idle } = await openStream(target, withThoughts ?? plain, request.signal));
-    // Google refusing the thoughts field: ask again without it.
-    if (withThoughts && response.status === 400) {
-      const text = await response.text();
-      if (/include_thoughts|thinking_config|extra_body/i.test(text)) {
-        idle.done();
-        ({ response, idle } = await openStream(target, plain, request.signal));
-      } else {
-        idle.done();
+    for (const [i, body] of tries.entries()) {
+      ({ response, idle } = await openStream(target, body, request.signal));
+      if (i === tries.length - 1 || response.status !== 400) break;
+      // Google refused this form of the thoughts request: say why in the log, then try the next.
+      const text = await idle.read(response.text());
+      idle.done();
+      if (!/include_thoughts|thinking|extra_body|reasoning_effort/i.test(text)) {
         throw new ApiError(clean(target, describeHttpError(400, text, target)), 400);
       }
+      refusals.push(clean(target, text.replace(/\s+/g, " ").slice(0, 300)));
     }
   } catch (error) {
     throw fail(error);
   }
+  const used = refusals.length;
 
   try {
     if (!response.ok) {
@@ -330,7 +334,7 @@ export async function streamChatCompletion(
       return result;
     }
 
-    const acc = { raw: "", fieldReasoning: "", model: "", finishReason: null as string | null };
+    const acc = { raw: "", fieldReasoning: "", model: "", finishReason: null as string | null, fields: new Set<string>() };
     const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning);
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
@@ -371,6 +375,13 @@ export async function streamChatCompletion(
       );
     }
     target.onResult?.(provider, { ok: true, ms: Date.now() - started });
+    if (target.provider === "vertex") {
+      // One line per reply, so "no thinking shows" can be traced from the server's log (journalctl -u anoesia).
+      const asked = used < tries.length - 1 ? `asked (form ${used + 1} of ${tries.length - 1})` : tries.length > 1 ? "refused" : "not asked";
+      console.log(
+        `Vertex AI reply: ${acc.model || request.model}; thoughts ${asked}; ${final.reasoning.length} characters of reasoning, ${final.content.length} of text; fields seen: ${[...acc.fields].join(", ") || "none"}${refusals.length ? `; Google said: ${refusals.join(" | ")}` : ""}`,
+      );
+    }
     return { content: final.content, toolCalls: [], model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning };
   } catch (error) {
     throw fail(error);
@@ -381,17 +392,31 @@ export async function streamChatCompletion(
 
 /**
  * Vertex AI's body with Gemini asked for its thought summaries
- * (`extra_body.google.thinking_config.include_thoughts`), or null when
- * that isn't wanted: thinking is off, or the profile's extra parameters
- * already say whether to include thoughts.
+ * (`extra_body.google.thinking_config.include_thoughts`), in the forms to
+ * try, best first; none when that isn't wanted (thinking is off, or the
+ * profile's extra parameters already say whether to include thoughts).
+ *
+ * Google won't take `reasoning_effort` beside a thinking budget or level,
+ * and may not beside `include_thoughts` either. So with a reasoning
+ * setting, the second form says it in Gemini's own words instead: a
+ * thinking budget for Gemini 2.5 (low 1,024, medium 8,192, high 24,576
+ * tokens, as Google maps it), a thinking level for later models.
  */
-export function askForThoughts(body: Record<string, unknown>, request: CompletionRequest): Record<string, unknown> | null {
-  if (request.reasoningEffort === "none") return null;
+export function thoughtsBodies(body: Record<string, unknown>, request: CompletionRequest): Record<string, unknown>[] {
+  if (request.reasoningEffort === "none") return [];
   const extra = isRecord(body.extra_body) ? body.extra_body : {};
   const google = isRecord(extra.google) ? extra.google : {};
   const thinking = isRecord(google.thinking_config) ? google.thinking_config : {};
-  if ("include_thoughts" in thinking) return null;
-  return { ...body, extra_body: { ...extra, google: { ...google, thinking_config: { ...thinking, include_thoughts: true } } } };
+  if ("include_thoughts" in thinking) return [];
+  const withConfig = (b: Record<string, unknown>, config: Record<string, unknown>) => ({ ...b, extra_body: { ...extra, google: { ...google, thinking_config: { ...thinking, ...config, include_thoughts: true } } } });
+  const forms = [withConfig(body, {})];
+  const effort = request.reasoningEffort;
+  if (effort && !("thinking_budget" in thinking) && !("thinking_level" in thinking)) {
+    const { reasoning_effort: _dropped, ...rest } = body;
+    const config = /gemini-2\.5/i.test(request.model) ? { thinking_budget: { low: 1024, medium: 8192, high: 24576 }[effort] } : { thinking_level: effort === "low" ? "low" : "high" };
+    forms.push(withConfig(rest, config));
+  }
+  return forms;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -399,7 +424,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Read one streamed chunk into `acc`. Returns whether the reply changed. */
-function readChunk(data: string, acc: { raw: string; fieldReasoning: string; model: string; finishReason: string | null }, target: ApiOptions): boolean {
+function readChunk(data: string, acc: { raw: string; fieldReasoning: string; model: string; finishReason: string | null; fields: Set<string> }, target: ApiOptions): boolean {
   let json: unknown;
   try {
     json = JSON.parse(data);
@@ -419,6 +444,10 @@ function readChunk(data: string, acc: { raw: string; fieldReasoning: string; mod
   if (typeof choice?.finish_reason === "string") acc.finishReason = choice.finish_reason;
   const delta = choice?.delta;
   if (!delta) return false;
+  for (const [key, value] of Object.entries(delta)) {
+    if (value === null || value === "" || key === "role") continue;
+    acc.fields.add(isRecord(value) ? `${key}{${Object.keys(value).join(",")}}` : key);
+  }
   const before = acc.raw.length + acc.fieldReasoning.length;
   const thought = delta.extra_content?.google?.thought === true;
   const field = [delta.reasoning, delta.reasoning_content].find((v) => typeof v === "string" && v !== "");
@@ -445,7 +474,21 @@ function readChunk(data: string, acc: { raw: string; fieldReasoning: string; mod
 export function liveReply(raw: string, fieldReasoning: string): LiveReply {
   const parts = thinkParts(raw.replace(/<\/?(t(h(i(n(k)?)?|o(u(g(h(t)?)?)?)?)?)?)?$/i, ""));
   const reasoning = fieldReasoning.trim() ? fieldReasoning.trim() : parts.reasoning.join("\n\n");
-  return { reasoning, content: parts.rest };
+  return { reasoning: echoes(reasoning, parts.rest) ? "" : reasoning, content: parts.rest };
+}
+
+/**
+ * Whether a "reasoning" is only the reply again. Some providers fill the
+ * reasoning field with the reply's own text when the model didn't think
+ * (seen with DeepSeek V3.1 Terminus on nanoGPT); that isn't reasoning, so
+ * it isn't shown or kept. As it streams, one may be ahead of the other, so
+ * either starting with the other counts.
+ */
+export function echoes(reasoning: string, content: string): boolean {
+  const r = reasoning.replace(/\s+/g, " ").trim();
+  const c = content.replace(/\s+/g, " ").trim();
+  if (!r || !c) return false;
+  return c.startsWith(r) || r.startsWith(c);
 }
 
 /** Stops a streamed request when it goes quiet for too long. */
