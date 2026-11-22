@@ -13,11 +13,19 @@ WorkingDirectory=/opt/anoesia
 Environment=ANOESIA_HOSTED=1
 # Your time zone, for {{date}} and {{time}}.
 Environment=TZ=America/Chicago
-ExecStart=/usr/local/bin/bun run src/server.ts
+# --smol: Bun frees memory sooner, for a small server shared with Amaedori.
+ExecStart=/usr/local/bin/bun --smol run src/server.ts
 Restart=always
 RestartSec=3
 # The model can take minutes on a reply; give it a moment to finish saving when stopped.
 TimeoutStopSec=20
+
+# A ceiling on memory, so a runaway never freezes the whole server: past
+# MemoryHigh it's slowed and made to free memory; at MemoryMax it's stopped
+# and restarted (Restart=always) while everything else keeps running.
+# Percentages are of the server's RAM.
+MemoryHigh=30%
+MemoryMax=40%
 
 # Lock it down: its own folder is the only place it can write.
 NoNewPrivileges=true
