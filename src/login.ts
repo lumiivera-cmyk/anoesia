@@ -235,5 +235,5 @@ export function addressOf(request: Request, direct?: string | null): string {
  * and what a phone reads to add the app to the home screen.
  */
 export function isPublicPath(path: string): boolean {
-  return path === "/login" || path === "/api/login" || path === "/manifest.webmanifest" || path === "/icon.svg" || /^\/icons\/[\w.-]+\.png$/.test(path) || path === "/favicon.ico";
+  return path === "/login" || path === "/api/login" || path === "/manifest.webmanifest" || path === "/sw.js" || path === "/icon.svg" || /^\/icons\/[\w.-]+\.png$/.test(path) || path === "/favicon.ico";
 }
