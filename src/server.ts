@@ -649,6 +649,13 @@ if (import.meta.main) {
     console.warn(`Warning: listening on ${config.host} with no password. Anyone who can reach it can open your chats. Set one with \`bun run set-password\`.`);
   }
   if (!config.apiKey) console.log("No NANOGPT_API_KEY in .env: add a key in Settings → Connections if you haven't.");
+  // A line in the server's log every 10 minutes with how much memory it holds, so if the
+  // server ever runs short, `journalctl -u anoesia | grep Memory` shows whether this app grew.
+  const mb = (n: number) => Math.round(n / 1048576);
+  setInterval(() => {
+    const m = process.memoryUsage();
+    console.log(`Memory: ${mb(m.rss)} MB in use (${mb(m.heapUsed)} MB of JavaScript)`);
+  }, 10 * 60 * 1000).unref();
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
       app.close();
