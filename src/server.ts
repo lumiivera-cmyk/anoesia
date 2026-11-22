@@ -391,7 +391,7 @@ export function createApp(config: Config): App {
         if (b.preset !== undefined) {
           const preset = typeof b.preset === "string" ? NUDGES[b.preset] : undefined;
           if (!preset) throw new ValidationError(`There's no nudge called ${String(b.preset)}.`);
-          return json(store.createBlock(p[0]!, { ...preset }));
+          return json(store.createBlock(p[0]!, { ...preset, nudge: true }));
         }
         return json(store.createBlock(p[0]!, b));
       }

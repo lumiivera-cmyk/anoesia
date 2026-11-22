@@ -447,6 +447,7 @@ dialog.scene-menu{width:340px;padding:6px;max-height:min(80dvh,600px);overflow:a
 .sc-note-head .sc-title:hover,.sc-note-head .sc-title:focus{background:var(--sunk-bg)}
 .sc-nudge .sc-note-head{align-items:center;gap:4px}
 .sc-nudge .sc-saved{min-height:0}
+.sc-where{font-size:var(--fs-xs);line-height:18px}
 .scene-menu .sc-del{width:var(--hit);height:var(--hit);padding:0;justify-content:center;color:var(--ink-4);flex:none}
 .sc-nudge.is-off textarea,.sc-nudge.is-off .sc-title{opacity:.55}
 .sc-add{display:flex;flex-wrap:wrap;gap:8px;padding:6px 12px 12px}

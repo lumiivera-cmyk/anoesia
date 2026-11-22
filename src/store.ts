@@ -482,9 +482,12 @@ export class Store {
     const role = raw.role === undefined ? "system" : checkRole(raw.role);
     const depth = raw.depth === undefined || raw.depth === null ? null : Number(raw.depth);
     if (depth !== null && (!Number.isInteger(depth) || depth < 0 || depth > 999)) throw new ValidationError("Depth is a whole number of messages from the end, 0 to 999.");
+    if (raw.nudge !== undefined && typeof raw.nudge !== "boolean") throw new ValidationError("nudge must be true or false.");
     this.db.transaction(() => {
       this.db.query("UPDATE prompt_blocks SET position = position + 1 WHERE chat_id = ? AND position >= ?").run(chatId, at);
-      this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, depth, position) VALUES (?, ?, 'text', ?, ?, ?, ?, ?)").run(id, chatId, title, (raw.content as string) ?? "", role, depth, at);
+      this.db
+        .query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, depth, position, nudge) VALUES (?, ?, 'text', ?, ?, ?, ?, ?, ?)")
+        .run(id, chatId, title, (raw.content as string) ?? "", role, depth, at, raw.nudge ? 1 : 0);
     })();
     return this.block(id);
   }
@@ -519,6 +522,11 @@ export class Store {
         if (typeof raw.enabled !== "boolean") throw new ValidationError("enabled must be true or false.");
         if (block.kind === "history" && !raw.enabled) throw new ValidationError("The chat history can't be switched off.");
         this.db.query("UPDATE prompt_blocks SET enabled = ? WHERE id = ?").run(raw.enabled ? 1 : 0, id);
+      }
+      if (raw.nudge !== undefined) {
+        if (typeof raw.nudge !== "boolean") throw new ValidationError("nudge must be true or false.");
+        if (block.kind !== "text") throw new ValidationError("Only your own text blocks can be nudges.");
+        this.db.query("UPDATE prompt_blocks SET nudge = ? WHERE id = ?").run(raw.nudge ? 1 : 0, id);
       }
       if (raw.depth !== undefined) {
         if (block.kind === "history") throw new ValidationError("The chat history can't go inside itself.");
@@ -669,8 +677,8 @@ export class Store {
       this.db.query("INSERT INTO chats (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, at, at);
       this.db.query("INSERT INTO chat_cast (chat_id, card_id, position, onstage) SELECT ?, card_id, position, onstage FROM chat_cast WHERE chat_id = ?").run(id, chatId);
       const blocks = this.db.query("SELECT * FROM prompt_blocks WHERE chat_id = ? ORDER BY position").all(chatId) as Row[];
-      const insertBlock = this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, card_id, field_id, title, content, role, enabled, depth, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      for (const b of blocks) insertBlock.run(newId(), id, b.kind as string, (b.card_id as string | null) ?? null, (b.field_id as string | null) ?? null, b.title as string, b.content as string, b.role as string, b.enabled as number, (b.depth as number | null) ?? null, b.position as number);
+      const insertBlock = this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, card_id, field_id, title, content, role, enabled, depth, position, nudge) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const b of blocks) insertBlock.run(newId(), id, b.kind as string, (b.card_id as string | null) ?? null, (b.field_id as string | null) ?? null, b.title as string, b.content as string, b.role as string, b.enabled as number, (b.depth as number | null) ?? null, b.position as number, (b.nudge as number) ?? 0);
       this.db.query("INSERT INTO macro_vars (scope, key, value) SELECT ?, key, value FROM macro_vars WHERE scope = ?").run(id, chatId);
       const messages = this.db.query("SELECT * FROM messages WHERE chat_id = ? AND seq <= ? ORDER BY seq").all(chatId, seq) as Row[];
       const insertMessage = this.db.query(
@@ -793,6 +801,7 @@ function toBlock(r: Row, mainPrompt: string, offstage: Set<string>): PromptBlock
     depth: (r.depth as number | null) ?? null,
     position: r.position as number,
     offstage: kind === "field" && offstage.has(r.card_id as string),
+    nudge: kind === "text" && r.nudge === 1,
   };
 }
 

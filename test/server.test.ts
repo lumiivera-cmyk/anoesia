@@ -553,6 +553,23 @@ test("nudges: adding one makes a block right after your post, as you", async () 
   expect(sent.at(-1)!.content).toContain("My post was about 4 words, in one paragraph");
 });
 
+test("nudges: the mark stays through a rename, a new role or depth, and a branch", async () => {
+  const { chat } = await setUp();
+  const pace = (await call("POST", `/api/chats/${chat.id}/blocks`, { preset: "pace" })).data;
+  expect(pace.nudge).toBe(true);
+  const own = (await call("POST", `/api/chats/${chat.id}/blocks`, { title: "Nudge", content: "(Be brief.)", role: "user", depth: 0, nudge: true })).data;
+  const plain = (await call("POST", `/api/chats/${chat.id}/blocks`, { title: "Plain", content: "x" })).data;
+  expect(plain.nudge).toBe(false);
+  const moved = (await call("PATCH", `/api/blocks/${own.id}`, { title: "Brevity", role: "system", depth: 3 })).data;
+  expect(moved).toMatchObject({ title: "Brevity", nudge: true });
+  expect((await call("PATCH", `/api/blocks/${plain.id}`, { nudge: true })).data.nudge).toBe(true);
+  expect((await call("PATCH", `/api/blocks/${plain.id}`, { nudge: "yes" })).status).toBe(400);
+  const history = (await call("GET", `/api/chats/${chat.id}/blocks`)).data.find((b: { kind: string }) => b.kind === "history");
+  expect((await call("PATCH", `/api/blocks/${history.id}`, { nudge: true })).status).toBe(400);
+  const titles = (await call("GET", `/api/chats/${chat.id}/blocks`)).data.filter((b: { nudge: boolean }) => b.nudge).map((b: { title: string }) => b.title);
+  expect(titles.sort()).toEqual(["Brevity", "Match my pace", "Plain"]);
+});
+
 describe("streaming a reply", () => {
   /** A stand-in model that streams `chunks` (each a delta, or an error object), waiting `gapMs` between them. */
   function streams(chunks: Record<string, unknown>[], gapMs = 0) {

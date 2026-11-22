@@ -21,7 +21,7 @@ function card(name: string, fields: [string, string][], extra: Partial<Card> = {
 
 let n = 0;
 function block(kind: PromptBlock["kind"], over: Partial<PromptBlock> = {}): PromptBlock {
-  return { id: `b${n++}`, chatId: "c", kind, cardId: null, fieldId: null, title: kind === "main" ? "Main prompt" : kind === "history" ? "Chat history" : "Note", content: "", role: kind === "history" ? "user" : "system", enabled: true, depth: null, position: n, offstage: false, ...over };
+  return { id: `b${n++}`, chatId: "c", kind, cardId: null, fieldId: null, title: kind === "main" ? "Main prompt" : kind === "history" ? "Chat history" : "Note", content: "", role: kind === "history" ? "user" : "system", enabled: true, depth: null, position: n, offstage: false, nudge: false, ...over };
 }
 
 function fieldBlocks(c: Card): PromptBlock[] {

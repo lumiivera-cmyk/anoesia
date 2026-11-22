@@ -10,9 +10,11 @@
  * and its nudges, all written right there: each text saves itself a moment
  * after you stop typing, when it loses focus, and when the sheet closes.
  *
- * A nudge is a text block sent right after your post, as you (depth 0,
- * user role; see src/nudges.ts). The sheet lists every such block in the
- * chat, lets you switch each on or off, rename, reword or remove it, and
+ * A nudge is a text block marked as one (`nudge`): the ones made here or
+ * from the ready-made list (src/nudges.ts), and any block the prompts page
+ * puts "in the scene menu". New ones go right after your post, as you; the
+ * mark stays whatever the block is renamed to or wherever it moves. The
+ * sheet lets you switch each on or off, rename, reword or remove it, and
  * adds your own or a ready-made one. Notes and nudges are blocks on the
  * prompts page too: same text, two ways in.
  */
@@ -27,10 +29,10 @@ const NOTE_HINTS = {
   "Who knows what": "one line per secret",
 };
 
-/** The ready-made nudges (src/nudges.ts), offered while the chat doesn't have one by that name. */
+/** The ready-made nudges (src/nudges.ts), offered while the chat has none by that name or with its words (renamed). */
 const PRESETS = [
-  { preset: "pace", title: "Match my pace", label: "match my pace" },
-  { preset: "restraint", title: "Scene restraint", label: "scene restraint" },
+  { preset: "pace", title: "Match my pace", label: "match my pace", marker: "{{paceNote}}" },
+  { preset: "restraint", title: "Scene restraint", label: "scene restraint", marker: "Stop at the first point where" },
 ];
 
 /** This chat's notes and nudges, as the server last saved them. */
@@ -44,7 +46,7 @@ const SAVE_AFTER_MS = 700;
 const timers = new Map();
 const inflight = new Map();
 
-const isNudge = (b) => b.kind === "text" && b.role === "user" && b.depth === 0;
+const isNudge = (b) => b.kind === "text" && b.nudge;
 const notes = () => blocks.filter((b) => b.kind === "note");
 const nudges = () => blocks.filter(isNudge);
 const menu = () => $("scene-menu");
@@ -123,11 +125,10 @@ function render() {
           <input class="sc-title" id="sc-t-${n.id}" data-text="${n.id}:title" value="${escapeHtml(title)}" aria-label="Nudge name" maxlength="200" />${saved(n.id)}
           <button type="button" class="ghost press ib sc-del" data-remove="${n.id}" aria-label="Remove ${escapeHtml(title)}" title="Remove">${icon.trash(18)}</button>
           <button type="button" role="switch" class="switch" aria-checked="${n.enabled}" aria-label="${escapeHtml(title)} on" data-enable="${n.id}"><span class="knob"></span></button></span>
-        <textarea class="sunk" id="sc-${n.id}" data-text="${n.id}:content" rows="2" aria-label="${escapeHtml(title)} text" placeholder="what the narrator should keep in mind next · empty isn't sent">${escapeHtml(value(n, "content"))}</textarea></li>`;
+        <textarea class="sunk" id="sc-${n.id}" data-text="${n.id}:content" rows="2" aria-label="${escapeHtml(title)} text" placeholder="what the narrator should keep in mind next · empty isn't sent">${escapeHtml(value(n, "content"))}</textarea>${whereLine(n)}</li>`;
     })
     .join("");
-  const have = new Set(nudges().map((n) => n.title));
-  const presetButtons = PRESETS.filter((p) => !have.has(p.title))
+  const presetButtons = PRESETS.filter((p) => !nudges().some((n) => n.title === p.title || n.content.includes(p.marker)))
     .map((p) => `<button type="button" class="raised press btn" data-preset="${p.preset}">${icon.plus(16)}${p.label}</button>`)
     .join("");
   // Only the body is redrawn: in selenite the sheet's plate lives in the dialog beside it.
@@ -142,6 +143,14 @@ function render() {
     <h3 class="eyebrow sc-h" id="sc-nudges-h">Nudges <span class="meta">sent right after your post, as you</span></h3>
     <ul class="sc-list" aria-labelledby="sc-nudges-h">${nudgeRows || `<li class="meta sc-empty">None in this chat.</li>`}</ul>
     <div class="sc-add"><button type="button" class="raised press btn" data-new-nudge>${icon.plus(16)}your own</button>${presetButtons}</div>`;
+}
+
+/** Where a nudge goes, when it isn't the usual right after your post, as you (moved on the prompts page). */
+function whereLine(n) {
+  if (n.role === "user" && n.depth === 0) return "";
+  const who = n.role === "user" ? "as you" : n.role === "assistant" ? "as the narrator" : "as instructions";
+  const where = n.depth === null ? "in its place in the prompt" : n.depth === 0 ? "after the last message" : `${n.depth} message${n.depth === 1 ? "" : "s"} from the end`;
+  return `<span class="meta sc-where">sent ${who}, ${where} · change it on the prompts page</span>`;
 }
 
 /** Redraw, size the texts, and put focus on `selector` (the control that was used, or what replaced it). */
@@ -184,7 +193,7 @@ async function onClick(e) {
   }
   const add = e.target.closest("[data-new-nudge], [data-preset]");
   if (add) {
-    const body = add.dataset.preset ? { preset: add.dataset.preset } : { title: "Nudge", content: "", role: "user", depth: 0 };
+    const body = add.dataset.preset ? { preset: add.dataset.preset } : { title: "Nudge", content: "", role: "user", depth: 0, nudge: true };
     const made = await attempt(() => api("POST", `/api/chats/${state.chatId}/blocks`, body));
     if (!made) return;
     blocks = [...blocks, made];
