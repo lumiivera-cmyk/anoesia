@@ -67,6 +67,27 @@ put it under a path of Amaedori's address instead.
 cd /opt/anoesia && sudo -u anoesia git pull && systemctl restart anoesia
 ```
 
+When `deploy/anoesia.service` changes, copy it in again too:
+
+```sh
+cp deploy/anoesia.service /etc/systemd/system/ && systemctl daemon-reload && systemctl restart anoesia
+```
+
+## If the whole server freezes
+
+A server that stops answering everything (even typing over SSH) until it's
+restarted has almost always run out of memory with no swap to fall back on.
+The service file caps Anoesia's memory, so it gets restarted on its own
+instead. A swap file gives the server room to breathe too (once):
+
+```sh
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+Anoesia writes its memory use to its log every 10 minutes:
+`journalctl -u anoesia | grep Memory | tail`.
+
 ## Backups
 
 Everything is in `/opt/anoesia/data`: the database (`anoesia.db`) and the
