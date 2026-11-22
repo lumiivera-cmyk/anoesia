@@ -63,6 +63,8 @@ async function start() {
   watchDialogs();
   $("confirm-icon").innerHTML = icon.trash(16);
   for (const h of document.querySelectorAll("h1")) h.tabIndex = -1;
+  // Lets Android Chrome install Anoesia as a full-screen app (public/sw.js).
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
   try {
     await loadState();
   } catch (error) {
