@@ -215,6 +215,7 @@ function bodyHtml(b) {
     <div class="macbar sunk" role="group" aria-label="Insert a macro">${macroBarHtml(id)}</div>
     <div class="bactions">
       <button type="button" class="btn ghost press" data-place="${b.id}">${placeLabel}</button>
+      ${b.kind === "text" ? `<button type="button" class="btn ghost press" data-nudge-mark="${b.id}" aria-pressed="${b.nudge}" title="Nudges are one tap from the chat's scene menu">${b.nudge ? "take out of the scene menu" : "show in the scene menu"}</button>` : ""}
       ${b.kind === "text" ? `<button type="button" class="btn btn-quiet-danger press" data-delete="${b.id}">${icon.trash(16)} delete block</button>` : ""}
       <span class="meta src-note">${where}</span><span class="grow"></span><span class="meta save-state" role="status" data-status-of="${b.id}"></span>
     </div>
@@ -717,6 +718,15 @@ async function onClick(e) {
     if (await patch(b.id, { depth: b.depth === null ? 1 : null })) {
       open.add(b.id);
       afterChange(`[data-place="${b.id}"]`);
+    }
+    return;
+  }
+  const mark = t.closest("[data-nudge-mark]");
+  if (mark) {
+    const b = blocks.find((x) => x.id === mark.dataset.nudgeMark);
+    if (await patch(b.id, { nudge: !b.nudge })) {
+      open.add(b.id);
+      afterChange(`[data-nudge-mark="${b.id}"]`);
     }
     return;
   }

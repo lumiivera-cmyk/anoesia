@@ -187,6 +187,8 @@ export interface PromptBlock {
   position: number;
   /** For a field block: its card is offstage in this chat (only the Description is sent). */
   offstage: boolean;
+  /** A text block shown in the chat's scene menu as a nudge, whatever its name, role or depth. */
+  nudge: boolean;
 }
 
 

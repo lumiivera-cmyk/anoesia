@@ -444,7 +444,7 @@ export class Workspace {
   private removeBlock(blockId: string): Record<string, unknown> {
     const row = this.store.db.query("SELECT * FROM prompt_blocks WHERE id = ?").get(blockId) as Row;
     this.store.deleteBlock(blockId);
-    return { chatId: row.chat_id, title: row.title, role: row.role, enabled: row.enabled, depth: row.depth, position: row.position };
+    return { chatId: row.chat_id, title: row.title, role: row.role, enabled: row.enabled, depth: row.depth, position: row.position, nudge: row.nudge };
   }
 
   /** Put back something deleted, under its old id. */
@@ -460,7 +460,7 @@ export class Workspace {
     } else if (kind === "block" && meta) {
       this.store.chat(meta.chatId as string);
       db.query("UPDATE prompt_blocks SET position = position + 1 WHERE chat_id = ? AND position >= ?").run(meta.chatId as string, meta.position as number);
-      db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, enabled, depth, position) VALUES (?, ?, 'text', ?, ?, ?, ?, ?, ?)").run(
+      db.query("INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, enabled, depth, position, nudge) VALUES (?, ?, 'text', ?, ?, ?, ?, ?, ?, ?)").run(
         id!,
         meta.chatId as string,
         meta.title as string,
@@ -469,6 +469,7 @@ export class Workspace {
         meta.enabled as number,
         (meta.depth as number | null) ?? null,
         meta.position as number,
+        (meta.nudge as number | undefined) ?? 0,
       );
     } else throw new ValidationError("That can't be put back: what held it is gone.");
   }

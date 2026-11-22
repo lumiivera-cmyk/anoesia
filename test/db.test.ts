@@ -95,6 +95,7 @@ test("a database at 7 gets a reasoning for each reply's versions (8), older repl
   old.exec(`
     ALTER TABLE messages DROP COLUMN reasonings;
     ALTER TABLE messages DROP COLUMN story;
+    ALTER TABLE prompt_blocks DROP COLUMN nudge;
     INSERT INTO chats (id, name, created_at, updated_at) VALUES ('c', 'Old', 'x', 'x');
     INSERT INTO messages (id, chat_id, seq, role, author, swipes, created_at) VALUES ('m', 'c', 1, 'assistant', 'narrator', '["One.","Two."]', 'x');
     PRAGMA user_version = 7;
@@ -111,6 +112,7 @@ test("a database at 8 gets a saved story for each message (9), none for older on
   const old = openDatabase(file);
   old.exec(`
     ALTER TABLE messages DROP COLUMN story;
+    ALTER TABLE prompt_blocks DROP COLUMN nudge;
     INSERT INTO chats (id, name, created_at, updated_at) VALUES ('c', 'Old', 'x', 'x');
     INSERT INTO messages (id, chat_id, seq, role, author, swipes, created_at) VALUES ('m', 'c', 1, 'assistant', 'narrator', '["One."]', 'x');
     PRAGMA user_version = 8;
@@ -118,6 +120,25 @@ test("a database at 8 gets a saved story for each message (9), none for older on
   old.close();
   const db = openDatabase(file);
   expect((db.query("SELECT story FROM messages WHERE id = 'm'").get() as { story: string | null }).story).toBeNull();
+  expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(REAL);
+  db.close();
+});
+
+test("a database at 9 marks its nudges (10): text blocks as you, right after your post", () => {
+  const file = path();
+  const old = openDatabase(file);
+  old.exec(`
+    ALTER TABLE prompt_blocks DROP COLUMN nudge;
+    INSERT INTO chats (id, name, created_at, updated_at) VALUES ('c', 'Old', 'x', 'x');
+    INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, depth, position) VALUES ('n', 'c', 'text', 'Pace', '', 'user', 0, 1);
+    INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, depth, position) VALUES ('s', 'c', 'text', 'Style', '', 'system', NULL, 2);
+    INSERT INTO prompt_blocks (id, chat_id, kind, title, content, role, depth, position) VALUES ('d', 'c', 'text', 'Deep', '', 'user', 4, 3);
+    PRAGMA user_version = 9;
+  `);
+  old.close();
+  const db = openDatabase(file);
+  const marked = (db.query("SELECT id FROM prompt_blocks WHERE nudge = 1").all() as { id: string }[]).map((r) => r.id);
+  expect(marked).toEqual(["n"]);
   expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(REAL);
   db.close();
 });

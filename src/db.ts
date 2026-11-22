@@ -218,6 +218,14 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE messages ADD COLUMN story TEXT;
   `,
+
+  // 10: nudges are marked. A text block marked as a nudge stays in the
+  // chat's scene menu whatever its name, role or depth. Blocks that already
+  // were nudges (as you, right after your post) get the mark.
+  `
+  ALTER TABLE prompt_blocks ADD COLUMN nudge INTEGER NOT NULL DEFAULT 0;
+  UPDATE prompt_blocks SET nudge = 1 WHERE kind = 'text' AND role = 'user' AND depth = 0;
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */
