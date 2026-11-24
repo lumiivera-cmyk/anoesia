@@ -14,6 +14,7 @@
 import { $, api, attempt, escapeHtml, formatText, loadState, sendsOnEnter, state } from "./core.js";
 import { openChat, readEvents, renderChat as renderRoleplay } from "./chat.js";
 import { icon } from "./icons.js";
+import { confirmDialog } from "./overlay.js";
 import { reloadPrompts } from "./prompts.js";
 import { renderSide } from "./side.js";
 
@@ -206,6 +207,57 @@ function editHtml(e) {
   </div>`;
 }
 
+/** Your messages and the agent's answers, grouped: each of yours, then its answers (the one shown, and earlier versions). */
+function exchanges(messages) {
+  const out = [];
+  for (const m of messages) {
+    if (m.role === "user" || !out.length) out.push({ user: m.role === "user" ? m : null, runs: [] });
+    if (m.role === "user") continue;
+    const ex = out.at(-1);
+    let run = ex.runs.find((r) => r.turnId === m.turnId);
+    if (!run) ex.runs.push((run = { turnId: m.turnId, messages: [], hidden: m.hidden }));
+    run.messages.push(m);
+  }
+  return out;
+}
+
+function toolHtml(call, result, live) {
+  const args = parseArgs(call.function.arguments);
+  if (call.function.name === "ask_user") {
+    return `<div class="agent-ask"><p>${escapeHtml(args.question ?? "")}</p><div class="agent-options">${(args.options ?? [])
+      .map(
+        (o) =>
+          `<button type="button" class="button agent-option" data-answer="${escapeHtml(o.label ?? "")}" ${live ? "" : "disabled"}>${escapeHtml(o.label ?? "")}${
+            o.description ? `<span class="muted small">${escapeHtml(o.description)}</span>` : ""
+          }</button>`,
+      )
+      .join("")}</div></div>`;
+  }
+  const failed = result?.content.startsWith("Error:");
+  return `<details class="agent-tool${failed ? " failed" : ""}"><summary>${escapeHtml(callSummary(call.function.name, args))}${failed ? " (failed)" : ""}</summary><pre>${escapeHtml(
+    result?.content ?? "(no result)",
+  )}</pre></details>`;
+}
+
+const ACT_ICONS = { copy: () => icon.copy(), edit: () => icon.edit(), branch: () => icon.branch(), rewind: () => icon.rewind(), reroll: () => icon.regen() };
+
+function actButton(act, id, label, svg = ACT_ICONS[act]()) {
+  return `<button type="button" class="ghost press ib agent-act" data-agent-act="${act}" data-id="${id}" aria-label="${label}" title="${label}">${svg}</button>`;
+}
+
+/** A message's actions. The last answer's stay shown, with its versions and reroll; the rest show on hover, or on a tap on a phone. */
+function actsHtml(acts, last, id, runs = null) {
+  const versions =
+    runs && runs.length > 1
+      ? (() => {
+          const at = runs.findIndex((r) => !r.hidden);
+          return `<span class="sunk versions"><button type="button" class="ghost press ib" data-agent-version="${at - 1}" aria-label="Previous version" ${at === 0 ? 'aria-disabled="true"' : ""}>${icon.left()}</button><span class="vcount">${at + 1} / ${runs.length}</span><button type="button" class="ghost press ib" data-agent-version="${at + 1}" aria-label="Next version" ${at === runs.length - 1 ? 'aria-disabled="true"' : ""}>${icon.right()}</button></span>`;
+        })()
+      : "";
+  const reroll = runs ? actButton("reroll", id, "Reroll: undo what it did and answer again") : "";
+  return `<div class="agent-acts${last ? " shown" : ""}">${acts.map(([act, mid, label]) => actButton(act, mid, label)).join("")}<span class="spacer"></span>${versions}${reroll}</div>`;
+}
+
 function renderChat() {
   const log = $("agent-log");
   const view = agent.view;
@@ -238,47 +290,46 @@ function renderChat() {
     editsByTurn.get(e.turnId).push(e);
   }
   const html = [];
-  const turns = [];
-  for (const m of view.messages) {
-    if (turns.at(-1)?.id !== m.turnId) turns.push({ id: m.turnId, messages: [] });
-    turns.at(-1).messages.push(m);
-  }
-  const lastTurn = turns.at(-1)?.id;
-  for (const turn of turns) {
-    for (const m of turn.messages) {
-      if (m.role === "user") html.push(`<div class="agent-msg user">${formatText(m.content)}</div>`);
-      if (m.role === "assistant") {
-        if (m.content.trim()) html.push(`<div class="agent-msg assistant">${formatText(m.content)}</div>`);
-        for (const call of m.toolCalls ?? []) {
-          const args = parseArgs(call.function.arguments);
-          const result = results.get(call.id);
-          if (call.function.name === "ask_user") {
-            const live = turn.id === lastTurn && !agent.busy;
-            html.push(`<div class="agent-ask"><p>${escapeHtml(args.question ?? "")}</p><div class="agent-options">${(args.options ?? [])
-              .map(
-                (o) =>
-                  `<button type="button" class="button agent-option" data-answer="${escapeHtml(o.label ?? "")}" ${live ? "" : "disabled"}>${escapeHtml(o.label ?? "")}${
-                    o.description ? `<span class="muted small">${escapeHtml(o.description)}</span>` : ""
-                  }</button>`,
-              )
-              .join("")}</div></div>`);
-            continue;
-          }
-          const failed = result?.content.startsWith("Error:");
-          html.push(`<details class="agent-tool${failed ? " failed" : ""}"><summary>${escapeHtml(callSummary(call.function.name, args))}${failed ? " (failed)" : ""}</summary><pre>${escapeHtml(
-            result?.content ?? "(no result)",
-          )}</pre></details>`);
-        }
-      }
+  const all = exchanges(view.messages);
+  all.forEach((ex, i) => {
+    const isLast = i === all.length - 1;
+    const shown = ex.runs.find((r) => !r.hidden);
+    const answering = isLast && agent.busy;
+    if (ex.user) {
+      html.push(`<div class="agent-ex-user" data-msg="${ex.user.id}"><div class="agent-msg user" data-text-of="${ex.user.id}">${formatText(ex.user.content)}</div>${
+        ex.user.id === "pending" || answering ? "" : actsHtml([["copy", ex.user.id, "Copy"], ["edit", ex.user.id, "Edit and send again"]], isLast && !shown, ex.user.id)
+      }</div>`);
     }
-    const edits = editsByTurn.get(turn.id);
+    if (!shown) {
+      // Stopped before it wrote anything: it can still be answered again.
+      if (isLast && ex.user && !agent.busy && ex.runs.length === 0) html.push(`<div class="agent-acts shown">${actButton("reroll", ex.user.id, "Answer again", icon.regen())}</div>`);
+      return;
+    }
+    html.push(`<div class="agent-run${isLast ? " last" : ""}" data-run="${shown.turnId}">`);
+    for (const m of shown.messages) {
+      if (m.role !== "assistant") continue;
+      if (m.content.trim()) html.push(`<div class="agent-msg assistant" data-text-of="${m.id}">${formatText(m.content)}</div>`);
+      for (const call of m.toolCalls ?? []) html.push(toolHtml(call, results.get(call.id), isLast && !agent.busy));
+    }
+    const edits = editsByTurn.get(shown.turnId);
     if (edits?.length) {
       const open = edits.filter((e) => !e.revertedAt).length;
       html.push(`<div class="agent-turn-edits"><div class="agent-edit-head"><strong class="small">${edits.length} change${edits.length === 1 ? "" : "s"} this turn</strong><span class="spacer"></span>${
-        open > 1 ? `<button type="button" class="button small-button" data-revert-turn="${turn.id}">Revert all ${open}</button>` : ""
+        open > 1 ? `<button type="button" class="button small-button" data-revert-turn="${shown.turnId}">Revert all ${open}</button>` : ""
       }</div>${edits.map(editHtml).join("")}</div>`);
     }
-  }
+    if (!answering) {
+      const words = [...shown.messages].reverse().find((m) => m.role === "assistant" && !m.toolCalls?.length && m.content.trim());
+      const end = shown.messages.at(-1);
+      const acts = [
+        ...(words ? [["copy", words.id, "Copy"], ["edit", words.id, "Edit"]] : []),
+        ["branch", end.id, "Branch from here"],
+        ...(isLast ? [] : [["rewind", end.id, "Rewind to here"]]),
+      ];
+      html.push(actsHtml(acts, isLast, end.id, isLast ? ex.runs : null));
+    }
+    html.push(`</div>`);
+  });
   if (agent.busy) html.push(liveHtml());
   const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   log.innerHTML = html.join("");
@@ -383,26 +434,46 @@ async function send(text) {
     agent.view = { session: s, messages: [], edits: [] };
   }
   const id = agent.sessionId;
+  // Show your message right away.
+  agent.view.messages.push({ id: "pending", turnId: "pending", role: "user", content: text, hidden: false });
+  $("agent-input").value = "";
+  const sent = await startRun(id, `api/agent/sessions/${id}/send`, { content: text, chatId: state.chatId });
+  // Refused before it started (no profile yet, say): your words go back in the box.
+  if (sent === "refused" && !$("agent-input").value) $("agent-input").value = text;
+}
+
+/**
+ * Run a turn (a message, a reroll, an edited message sent again) and show it
+ * as it's written. A conflict (something the old answer changed was changed
+ * again since) asks first, then goes ahead with force.
+ */
+async function startRun(id, path, body) {
   agent.busy = true;
   agent.live = { reasoning: "", content: "" };
   foldTouched = false;
   foldOpen = true;
   showError(null);
-  // Show your message right away.
-  agent.view.messages.push({ id: "pending", turnId: "pending", role: "user", content: text });
-  $("agent-input").value = "";
   renderChat();
-  const sent = await follow(id, (signal) =>
-    fetch(`api/agent/sessions/${id}/send?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text, chatId: state.chatId }), signal }),
-  );
-  // Refused before it started (no profile yet, say): your words go back in the box.
-  if (sent === "refused" && !$("agent-input").value) $("agent-input").value = text;
+  const open = (b) => (signal) => fetch(`${path}?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b), signal });
+  let result = await follow(id, open(body));
+  if (result === "conflict") {
+    const ok = await confirmDialog({ title: "Undo it anyway?", body: [lastConflict], confirm: "undo anyway", keep: "leave it", icon: icon.regen(16) });
+    if (!ok) return result;
+    agent.busy = true;
+    agent.live = { reasoning: "", content: "" };
+    renderChat();
+    result = await follow(id, open({ ...body, force: true }));
+  }
+  return result;
 }
 
 function showError(message) {
   $("agent-error").textContent = message ?? "";
   $("agent-error").hidden = !message;
 }
+
+/** Why the last turn was refused as a conflict (see `follow`). */
+let lastConflict = "";
 
 /** Which turn this panel is watching (one at a time), so a stream from a session you've left is let go. */
 let watching = null;
@@ -433,6 +504,12 @@ async function follow(id, open) {
     if (!(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
       const data = await response.json().catch(() => null);
       if (response.status === 401 && data?.login) location.href = "login";
+      // Something it changed was changed again since: the caller asks before going ahead.
+      if (response.status === 409) {
+        lastConflict = data?.error ?? "";
+        result = "conflict";
+        break;
+      }
       if (mine()) showError(data?.error ?? `The server answered ${response.status}.`);
       result = "refused";
       break;
@@ -521,6 +598,112 @@ async function revert(path, label) {
   await refreshApp();
 }
 
+/** Do something that may undo the agent's changes; when one was changed again since, ask, then do it anyway. Shows the session after. */
+async function withForce(call, question) {
+  let view;
+  try {
+    view = await call(false);
+  } catch (error) {
+    if (!/changed since/.test(error.message)) return showError(error.message);
+    const ok = await confirmDialog({ title: question, body: [error.message], confirm: "go ahead", keep: "leave it", icon: icon.regen(16) });
+    if (!ok) return;
+    view = await attempt(() => call(true));
+  }
+  if (!view) return;
+  showError(null);
+  if (view.session?.id === agent.sessionId) agent.view = view;
+  renderAll();
+  await refreshApp();
+}
+
+const messageById = (id) => agent.view?.messages.find((m) => m.id === id);
+
+async function act(what, id, button) {
+  const m = messageById(id);
+  if (!m || agent.busy) return;
+  if (what === "copy") {
+    const ok = await navigator.clipboard?.writeText(m.content).then(() => true, () => false);
+    if (!ok) return showError("Couldn't copy. Your browser blocked the clipboard.");
+    button.innerHTML = icon.check();
+    setTimeout(() => (button.innerHTML = icon.copy()), 1400);
+    return;
+  }
+  if (what === "edit") return startEdit(m);
+  if (what === "reroll") return startRun(agent.sessionId, `api/agent/sessions/${agent.sessionId}/reroll`, { chatId: state.chatId });
+  if (what === "branch") return branchFrom(m);
+  if (what === "rewind") {
+    const count = (await attempt(() => api("GET", `/api/agent/messages/${m.id}/rewind`)))?.changes ?? 0;
+    const ok = await confirmDialog({
+      title: "Rewind to here?",
+      body: [
+        "Everything after this goes for good.",
+        count ? `The ${count === 1 ? "change" : `${count} changes`} the agent made after it ${count === 1 ? "is" : "are"} undone.` : "The agent made no changes after it, so nothing else is undone.",
+      ],
+      confirm: "rewind",
+      keep: "keep them",
+      alt: "branch instead",
+      icon: icon.rewind(16),
+      opener: button,
+    });
+    if (ok === "alt") return branchFrom(m);
+    if (!ok) return;
+    return withForce((force) => api("POST", `/api/agent/messages/${m.id}/rewind`, { force }), "Rewind anyway?");
+  }
+}
+
+async function branchFrom(m) {
+  const view = await attempt(() => api("POST", `/api/agent/messages/${m.id}/branch`, {}));
+  if (!view) return;
+  await refreshList();
+  await openSession(view.session.id);
+}
+
+/** Edit a message in place: yours is sent again (what came after it is rewound), the agent's words are just changed. */
+function startEdit(m) {
+  const box = $("agent-log").querySelector(`[data-text-of="${m.id}"]`);
+  if (!box) return;
+  const yours = m.role === "user";
+  box.classList.add("editing");
+  box.innerHTML = `<form class="agent-edit-form"><label class="sr" for="agent-edit-${m.id}">${yours ? "Edit your message" : "Edit the agent's reply"}</label>
+    <textarea id="agent-edit-${m.id}">${escapeHtml(m.content)}</textarea>
+    <div class="row end"><button type="button" class="btn ghost press" data-edit-cancel>cancel</button><button type="submit" class="btn btn-primary press">${yours ? "send again" : "save"}</button></div></form>`;
+  const form = box.querySelector("form");
+  const area = form.querySelector("textarea");
+  const fit = () => {
+    area.style.height = "auto";
+    area.style.height = `${area.scrollHeight + 4}px`;
+  };
+  area.addEventListener("input", fit);
+  fit();
+  area.focus();
+  form.querySelector("[data-edit-cancel]").addEventListener("click", () => renderChat());
+  area.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") renderChat();
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const content = area.value.trim();
+    if (!content) return;
+    if (!yours) return withForce(() => api("PATCH", `/api/agent/messages/${m.id}`, { content }), "Save anyway?");
+    const later = exchanges(agent.view.messages).findIndex((ex) => ex.user?.id === m.id) < exchanges(agent.view.messages).length - 1;
+    const count = (await attempt(() => api("GET", `/api/agent/messages/${m.id}/rewind`)))?.changes ?? 0;
+    if (later || count) {
+      const ok = await confirmDialog({
+        title: "Send it again from here?",
+        body: [
+          later ? "Everything after this message goes for good, and it's answered again." : "It's answered again, in place of the answer it has.",
+          count ? `The ${count === 1 ? "change" : `${count} changes`} the agent made in reply ${count === 1 ? "is" : "are"} undone.` : "",
+        ].filter(Boolean),
+        confirm: "send again",
+        keep: "cancel",
+        icon: icon.regen(16),
+      });
+      if (!ok) return;
+    }
+    startRun(agent.sessionId, `api/agent/messages/${m.id}/resend`, { content, chatId: state.chatId });
+  });
+}
+
 export function wireAgent() {
   $("open-agent").addEventListener("click", () => toggleAgent());
   $("open-agent-phone").addEventListener("click", () => toggleAgent());
@@ -565,6 +748,15 @@ export function wireAgent() {
   $("agent-stop").addEventListener("click", stop);
   // Opening or closing the live thinking yourself keeps it as you left it.
   $("agent-log").addEventListener("click", (e) => {
+    // On a touch screen, a tap on a message shows its actions.
+    if (!e.target.closest("button, a, details, form, textarea")) {
+      const holder = e.target.closest(".agent-run, .agent-ex-user");
+      if (holder) {
+        const was = holder.classList.contains("show-acts");
+        for (const el of $("agent-log").querySelectorAll(".show-acts")) el.classList.remove("show-acts");
+        holder.classList.toggle("show-acts", !was);
+      }
+    }
     if (e.target.closest("[data-live-thinking] summary")) {
       foldTouched = true;
       foldOpen = !e.target.closest("details").open;
@@ -575,6 +767,11 @@ export function wireAgent() {
     const t = e.target.closest("button");
     if (!t) return;
     if (t.dataset.answer !== undefined) return send(t.dataset.answer);
+    if (t.dataset.agentAct) return act(t.dataset.agentAct, t.dataset.id, t);
+    if (t.dataset.agentVersion !== undefined) {
+      if (t.getAttribute("aria-disabled") === "true") return;
+      return withForce((force) => api("POST", `/api/agent/sessions/${agent.sessionId}/version`, { index: Number(t.dataset.agentVersion), force }), "Switch anyway?");
+    }
     if (t.dataset.revert) return revert(`/api/agent/edits/${t.dataset.revert}/revert`, "Revert anyway?");
     if (t.dataset.revertTurn) return revert(`/api/agent/turns/${t.dataset.revertTurn}/revert`, "Revert the whole turn anyway?");
     if (t.dataset.file !== undefined) {

@@ -474,13 +474,14 @@ export class Workspace {
     } else throw new ValidationError("That can't be put back: what held it is gone.");
   }
 
-  private delete(key: string): void {
+  /** Remove what a key holds; returns what's needed to put it back where it was. */
+  private delete(key: string): Record<string, unknown> | null {
     const [kind, id] = key.split(":");
     const rest = key.slice(kind!.length + 1);
-    if (kind === "file") this.agent.deleteFile(rest);
-    else if (kind === "field") this.store.db.query("DELETE FROM card_fields WHERE id = ?").run(id!);
-    else if (kind === "block") this.store.deleteBlock(id!);
-    else throw new ValidationError("That can't be removed.");
+    if (kind === "file") return (this.agent.deleteFile(rest), null);
+    if (kind === "field") return this.removeField(id!);
+    if (kind === "block") return this.removeBlock(id!);
+    throw new ValidationError("That can't be removed.");
   }
 
   /**
@@ -488,7 +489,7 @@ export class Workspace {
    * after the agent did), it's left alone unless `force` is set, so a
    * revert never throws away newer work without asking.
    */
-  revert(editId: string, force = false): AgentEdit {
+  revert(editId: string, force = false, setAside = false): AgentEdit {
     const edit = this.agent.edit(editId);
     if (edit.revertedAt) throw new ValidationError("That change is already reverted.");
     const now = this.valueOf(edit.target);
@@ -497,11 +498,57 @@ export class Workspace {
     }
     this.store.db.transaction(() => {
       if (edit.before === null) {
-        if (now !== null) this.delete(edit.target);
+        // Taking away something it made: keep where it was, so it can be put back.
+        if (now !== null) this.agent.setEditMeta(edit.id, this.delete(edit.target));
       } else if (now === null) this.restore(edit.target, edit.before, edit.meta);
       else this.setValue(edit.target, edit.before);
     })();
-    return this.agent.markReverted(edit.id);
+    return this.agent.markReverted(edit.id, setAside);
+  }
+
+  /**
+   * Undo several changes at once, newest first (a reroll or a rewind taking
+   * back what its answers did). Checks them all first, so a conflict
+   * leaves everything as it was, unless `force`. `setAside` marks them to
+   * be put back if that answer's version is switched back to.
+   */
+  revertEdits(edits: AgentEdit[], force = false, setAside = false): AgentEdit[] {
+    const open = edits.filter((e) => !e.revertedAt).sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    if (!force) {
+      const simulated = new Map<string, string | null>();
+      for (const e of open) {
+        const current = simulated.has(e.target) ? simulated.get(e.target)! : this.valueOf(e.target);
+        if (current !== e.after) throw new ConflictError(`${e.path} has changed since the agent's edit, so undoing what it did would also undo your newer changes. Go ahead anyway to put back the text from before.`);
+        simulated.set(e.target, e.before);
+      }
+    }
+    return open.map((e) => this.revert(e.id, true, setAside));
+  }
+
+  /**
+   * Put changes back in place, oldest first (switching back to an answer's
+   * version). Checks them all first, so a conflict changes nothing, unless `force`.
+   */
+  reapplyEdits(edits: AgentEdit[], force = false): AgentEdit[] {
+    const order = edits.filter((e) => e.revertedAt).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    if (!force) {
+      const simulated = new Map<string, string | null>();
+      for (const e of order) {
+        const current = simulated.has(e.target) ? simulated.get(e.target)! : this.valueOf(e.target);
+        if (current !== e.before) throw new ConflictError(`${e.path} has changed since that version, so putting its changes back would undo your newer ones. Go ahead anyway to put that version's text back.`);
+        simulated.set(e.target, e.after);
+      }
+    }
+    return order.map((e) => {
+      const now = this.valueOf(e.target);
+      this.store.db.transaction(() => {
+        if (e.after === null) {
+          if (now !== null) this.agent.setEditMeta(e.id, this.delete(e.target));
+        } else if (now === null) this.restore(e.target, e.after, this.agent.edit(e.id).meta);
+        else this.setValue(e.target, e.after);
+      })();
+      return this.agent.markApplied(e.id);
+    });
   }
 
   /** Undo every change of one turn, newest first. Stops at the first conflict unless `force`. */
