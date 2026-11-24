@@ -171,7 +171,7 @@ export class AgentStore {
     return toEdit(row);
   }
 
-  addEdit(input: Omit<AgentEdit, "id" | "createdAt" | "revertedAt">): AgentEdit {
+  addEdit(input: Omit<AgentEdit, "id" | "createdAt" | "revertedAt" | "setAside">): AgentEdit {
     const id = newId();
     this.db
       .query("INSERT INTO agent_edits (id, session_id, turn_id, path, target, before, after, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -179,9 +179,46 @@ export class AgentStore {
     return this.edit(id);
   }
 
-  markReverted(id: string): AgentEdit {
-    this.db.query("UPDATE agent_edits SET reverted_at = ? WHERE id = ?").run(now(), id);
+  markReverted(id: string, setAside = false): AgentEdit {
+    this.db.query("UPDATE agent_edits SET reverted_at = ?, set_aside = ? WHERE id = ?").run(now(), setAside ? 1 : 0, id);
     return this.edit(id);
+  }
+
+  setEditMeta(id: string, meta: Record<string, unknown> | null): void {
+    this.db.query("UPDATE agent_edits SET meta = ? WHERE id = ?").run(meta ? JSON.stringify(meta) : null, id);
+  }
+
+  /** A change put back in place (its answer's version was switched back to). */
+  markApplied(id: string): AgentEdit {
+    this.db.query("UPDATE agent_edits SET reverted_at = NULL, set_aside = 0 WHERE id = ?").run(id);
+    return this.edit(id);
+  }
+
+  message(id: string): AgentMessage {
+    const row = this.db.query("SELECT * FROM agent_messages WHERE id = ?").get(id) as Row | null;
+    if (!row) throw new NotFoundError("agent message");
+    return toMessage(row);
+  }
+
+  /** Change a message's text (yours, or the agent's words; not a tool call or result). */
+  setMessageText(id: string, content: string): AgentMessage {
+    this.db.query("UPDATE agent_messages SET content = ? WHERE id = ?").run(content, id);
+    return this.message(id);
+  }
+
+  setHidden(ids: string[], hidden: boolean): void {
+    const q = this.db.query("UPDATE agent_messages SET hidden = ? WHERE id = ?");
+    for (const id of ids) q.run(hidden ? 1 : 0, id);
+  }
+
+  deleteMessages(ids: string[]): void {
+    const q = this.db.query("DELETE FROM agent_messages WHERE id = ?");
+    for (const id of ids) q.run(id);
+  }
+
+  /** Copy messages into another session, in order, as they are (a branch). */
+  copyMessages(toSession: string, messages: AgentMessage[]): void {
+    for (const m of messages) this.addMessage({ sessionId: toSession, turnId: m.turnId, role: m.role, content: m.content, toolCalls: m.toolCalls ?? undefined, toolCallId: m.toolCallId ?? undefined, toolName: m.toolName ?? undefined });
   }
 }
 
@@ -203,6 +240,7 @@ function toMessage(r: Row): AgentMessage {
     toolCalls: r.tool_calls ? (JSON.parse(r.tool_calls as string) as ApiToolCall[]) : null,
     toolCallId: (r.tool_call_id as string | null) ?? null,
     toolName: (r.tool_name as string | null) ?? null,
+    hidden: Boolean(r.hidden),
     createdAt: r.created_at as string,
   };
 }
@@ -219,5 +257,6 @@ function toEdit(r: Row): AgentEdit {
     meta: r.meta ? (JSON.parse(r.meta as string) as Record<string, unknown>) : null,
     createdAt: r.created_at as string,
     revertedAt: (r.reverted_at as string | null) ?? null,
+    setAside: Boolean(r.set_aside),
   };
 }

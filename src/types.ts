@@ -252,6 +252,8 @@ export interface AgentMessage {
   /** For a tool result: which call, and its tool. */
   toolCallId: string | null;
   toolName: string | null;
+  /** An earlier version of an answer (rerolled): kept to switch back to, never sent to the model. */
+  hidden: boolean;
   createdAt: string;
 }
 
@@ -271,4 +273,6 @@ export interface AgentEdit {
   meta: Record<string, unknown> | null;
   createdAt: string;
   revertedAt: string | null;
+  /** Reverted because its answer was rerolled; switching back to that version puts it back. */
+  setAside: boolean;
 }

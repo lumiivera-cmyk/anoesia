@@ -15,7 +15,7 @@ import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { NUDGES } from "./nudges.ts";
 import { FOLD_BATCH, foldMessages, foldStatus, nextFold } from "./summary.ts";
-import { prepareTurn } from "./agent.ts";
+import { branch, editText, prepareTurn, rewind, rewindCount, setAsideLastAnswer, switchVersion } from "./agent.ts";
 import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
 import { ConflictError, Workspace } from "./workspace.ts";
@@ -116,11 +116,11 @@ export function createApp(config: Config): App {
    * "reply"), each message once it's saved ("saved", with the session), and
    * "done" at the end. Stop keeps what was done so far.
    */
-  function startTurn(sessionId: string, text: string, chatId: string | null): Live {
+  function startTurn(sessionId: string, input: { text: string; chatId: string | null; again?: boolean; setup?: () => void }): Live {
     agent.session(sessionId);
     if (agentRunning.has(sessionId)) throw new ValidationError("The agent is still working on your last message.");
     const live: Live = { controller: new AbortController(), reply: { reasoning: "", content: "" }, watchers: new Set(), finished: Promise.resolve({}) };
-    const turn = prepareTurn({ store, agent, ws, api }, { sessionId, text, chatId, signal: live.controller.signal });
+    const turn = prepareTurn({ store, agent, ws, api }, { sessionId, ...input, signal: live.controller.signal });
     agentRunning.set(sessionId, live);
     live.finished = (async () => {
       let outcome: { error?: string } = {};
@@ -373,6 +373,17 @@ export function createApp(config: Config): App {
     return { ...e, path, diff: compactDiff(diff(e.before ?? "", e.after ?? "")) };
   }
 
+  /** A turn's answer: streamed with ?stream=1 (see `watch`), else once it's done. */
+  async function turnAnswer(id: string, live: Live, url: URL): Promise<Response> {
+    if (url.searchParams.get("stream") === "1") return watch(() => sessionView(id), live);
+    const outcome = await live.finished;
+    return json({ ...sessionView(id), ...outcome });
+  }
+
+  function notBusy(sessionId: string): void {
+    if (agentRunning.has(sessionId)) throw new ValidationError("The agent is still working. Stop it first.");
+  }
+
   function sessionView(id: string) {
     return { session: agent.session(id), messages: agent.messages(id), edits: agent.edits({ sessionId: id }).map(editView), busy: agentRunning.has(id) } as Json;
   }
@@ -583,10 +594,64 @@ export function createApp(config: Config): App {
     if ((p = m("/api/agent/sessions/:id/send")) && method === "POST") {
       const id = p[0]!;
       const b = await body();
-      const live = startTurn(id, typeof b.content === "string" ? b.content : "", typeof b.chatId === "string" ? b.chatId : null);
-      if (url.searchParams.get("stream") === "1") return watch(() => sessionView(id), live);
-      const outcome = await live.finished;
-      return json({ ...sessionView(id), ...outcome });
+      const live = startTurn(id, { text: typeof b.content === "string" ? b.content : "", chatId: typeof b.chatId === "string" ? b.chatId : null });
+      return turnAnswer(id, live, url);
+    }
+    // Reroll: the last answer's changes are taken back and set aside, and it's written again.
+    if ((p = m("/api/agent/sessions/:id/reroll")) && method === "POST") {
+      const id = p[0]!;
+      const b = await body();
+      const live = startTurn(id, { text: "", chatId: typeof b.chatId === "string" ? b.chatId : null, again: true, setup: () => setAsideLastAnswer({ agent, ws }, id, b.force === true) });
+      return turnAnswer(id, live, url);
+    }
+    // Show another version of the last answer, with its changes back in place.
+    if ((p = m("/api/agent/sessions/:id/version")) && method === "POST") {
+      const id = p[0]!;
+      const b = await body();
+      notBusy(id);
+      switchVersion({ agent, ws }, id, Number(b.index), b.force === true);
+      return json(sessionView(id));
+    }
+    if ((p = m("/api/agent/messages/:id"))) {
+      const message = agent.message(p[0]!);
+      if (method === "PATCH") {
+        notBusy(message.sessionId);
+        editText({ agent, ws }, message.id, (await body()).content);
+        return json(sessionView(message.sessionId));
+      }
+    }
+    // Rewind: everything after a message goes, and what the agent did after it is undone.
+    if ((p = m("/api/agent/messages/:id/rewind"))) {
+      const message = agent.message(p[0]!);
+      if (method === "GET") return json({ changes: rewindCount({ agent, ws }, message.id) });
+      if (method === "POST") {
+        notBusy(message.sessionId);
+        rewind({ agent, ws }, message.id, (await body()).force === true);
+        return json(sessionView(message.sessionId));
+      }
+    }
+    // Your message, edited and answered again: everything after it is rewound first.
+    if ((p = m("/api/agent/messages/:id/resend")) && method === "POST") {
+      const message = agent.message(p[0]!);
+      if (message.role !== "user") throw new ValidationError("Only your own messages can be sent again.");
+      const b = await body();
+      const content = typeof b.content === "string" ? b.content : message.content;
+      const live = startTurn(message.sessionId, {
+        text: "",
+        chatId: typeof b.chatId === "string" ? b.chatId : null,
+        again: true,
+        setup: () =>
+          agent.db.transaction(() => {
+            rewind({ agent, ws }, message.id, b.force === true);
+            editText({ agent, ws }, message.id, content);
+          })(),
+      });
+      return turnAnswer(message.sessionId, live, url);
+    }
+    // Branch: a new session with the conversation up to a message.
+    if ((p = m("/api/agent/messages/:id/branch")) && method === "POST") {
+      const copy = branch({ agent, ws }, p[0]!);
+      return json(sessionView(copy.id));
     }
     // Watch the turn being run (after the page was reloaded, or the phone slept).
     if ((p = m("/api/agent/sessions/:id/live")) && method === "GET") {
