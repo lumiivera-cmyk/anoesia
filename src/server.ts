@@ -329,7 +329,7 @@ export function createApp(config: Config): App {
   /** How the summary stands, for the scene menu and the chat. */
   function summaryView(chatId: string) {
     const note = store.summaryNote(chatId);
-    return { ...foldStatus(store.chat(chatId), store.messages(chatId)), noteId: note.id, sent: note.enabled && Boolean(note.content.trim()), folding: folding.has(chatId), error: foldErrors.get(chatId) ?? "" };
+    return { ...foldStatus(store.chat(chatId), store.messages(chatId)), batch: FOLD_BATCH, noteId: note.id, sent: note.enabled && Boolean(note.content.trim()), folding: folding.has(chatId), error: foldErrors.get(chatId) ?? "" };
   }
 
   function editView(e: AgentEdit) {
