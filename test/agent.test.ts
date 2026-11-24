@@ -614,3 +614,52 @@ describe("agent chat: rerolls, edits, rewind and branch", () => {
     expect(await main()).toBe("Main v1.");
   });
 });
+
+describe("versions, reasoning and the layout as paths", () => {
+  test("a message's versions and reasoning can be listed and read; a version can be edited, reasoning can't", () => {
+    const { ws, ctx, store, chat } = world();
+    const message = store.messages(chat.id)[1]!;
+    store.addSwipe(message.id, "Ada laughs.", "", "", "Make her warmer this time.");
+    const listed = ws.list("chats/Night Market/messages");
+    expect(listed[1]!.note).toContain("2 versions, 2 shown");
+    expect(listed[1]!.note).toContain("has reasoning");
+    const one = ws.list("chats/Night Market/messages/2").map((e) => e.path);
+    expect(one).toEqual(["chats/Night Market/messages/2/reasoning", "chats/Night Market/messages/2/versions/1", "chats/Night Market/messages/2/versions/2"]);
+    expect(ws.read("chats/Night Market/messages/2/reasoning").text).toBe("Make her warmer this time.");
+    expect(ws.read("chats/Night Market/messages/2/versions/1").text).toBe("Ada smirks. She checks the setlist twice.");
+    expect(ws.read("chats/Night Market/messages/2/versions/2/reasoning").text).toBe("Make her warmer this time.");
+    expect(() => ws.read("chats/Night Market/messages/2/versions/1/reasoning")).toThrow("no saved reasoning");
+    expect(() => ws.read("chats/Night Market/messages/2/versions/3")).toThrow("2 versions");
+    expect(() => ws.write("chats/Night Market/messages/2/reasoning", "No.", ctx)).toThrow("never changed");
+
+    // Editing a version that isn't shown changes that version only, and reverts.
+    const edit = ws.write("chats/Night Market/messages/2/versions/1", "Ada smirks, then laughs.", ctx);
+    expect(store.message(message.id).swipes).toEqual(["Ada smirks, then laughs.", "Ada laughs."]);
+    expect(store.message(message.id).content).toBe("Ada laughs.");
+    ws.revert(edit.id);
+    expect(store.message(message.id).swipes[0]).toBe("Ada smirks. She checks the setlist twice.");
+  });
+
+  test("the layout switches, moves and places blocks, and reverts", () => {
+    const { ws, ctx, store, chat } = world();
+    ws.write("chats/Night Market/blocks/Group pace", "Give everyone a beat.", ctx);
+    const before = ws.read("chats/Night Market/layout").text;
+    expect(before).toContain("(chat history)");
+    expect(before).toMatch(/Group pace \| on \| system$/m);
+    const lines = before.split("\n").map((l) => l.replace(/^\d+\.\s*/, ""));
+    const pace = lines.find((l) => l.startsWith("Group pace"))!;
+    const moved = [pace.replace("| on | system", "| off | user | depth 0"), ...lines.filter((l) => l !== pace)].join("\n");
+    const edit = ws.write("chats/Night Market/layout", moved, ctx);
+    const blocks = store.blocks(chat.id);
+    expect(blocks[0]).toMatchObject({ title: "Group pace", enabled: false, role: "user", depth: 0 });
+    expect(ws.read("chats/Night Market/layout").text.split("\n")[0]).toBe("1. Group pace | off | user | depth 0");
+
+    // Every block once, or nothing changes.
+    expect(() => ws.write("chats/Night Market/layout", lines.slice(1).join("\n"), ctx)).toThrow("every block once");
+    expect(() => ws.write("chats/Night Market/layout", moved.replace("| user |", "| narrator |"), ctx)).toThrow("isn't a role");
+    expect(store.blocks(chat.id)[0]!.title).toBe("Group pace");
+
+    ws.revert(edit.id);
+    expect(ws.read("chats/Night Market/layout").text).toBe(before);
+  });
+});
