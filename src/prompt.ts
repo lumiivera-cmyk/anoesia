@@ -22,13 +22,20 @@
  * `{{cast}}` (and `{{char}}`) skip it, so nothing invites someone who
  * isn't in the scene.
  *
- * Each chat has two notes of its own, "Right now" (where the story stands)
- * and "Who knows what" (one line per secret). They are blocks like any
- * other, sent under a `## Title` heading, and nothing when empty.
+ * Each chat has three notes of its own, "Story so far" (older scenes as
+ * finished beats), "Right now" (where the story stands) and "Who knows
+ * what" (one line per secret). They are blocks like any other, sent under
+ * a `## Title` heading, and nothing when empty.
+ *
+ * The story so far stands in for the messages it covers (src/summary.ts):
+ * while it's switched on and has text, the messages up to
+ * `summaryThrough` are left out of the history. Macros still see the whole
+ * chat ({{lastMessage}}, the message count and so on).
  */
 
 import { fillMacros, type MacroEnv } from "./macros.ts";
 import { latestUserPost } from "./nudges.ts";
+import { SUMMARY_NOTE } from "./summary.ts";
 import type { Card, ChatMessage, Message, PromptBlock } from "./types.ts";
 
 export { listNames } from "./macros.ts";
@@ -36,7 +43,7 @@ export { listNames } from "./macros.ts";
 export const DEFAULT_MAIN_PROMPT = `This is a roleplay between {{user}} and you, the narrator. You write the world and everyone in it: {{cast}}. {{user}} is written only by the user: never write their words, actions or thoughts.`;
 
 /** The chat notes every chat has, in the order a new chat gets them. */
-export const CHAT_NOTES = ["Right now", "Who knows what"] as const;
+export const CHAT_NOTES = ["Story so far", "Right now", "Who knows what"] as const;
 
 /** Whether a block is left out because its card is offstage: every field but the Description. */
 export function heldBack(block: PromptBlock, cards: Map<string, Card>): boolean {
@@ -67,6 +74,8 @@ export interface AssembledPrompt {
   /** The variables after this prompt's macros ran (saved only when the prompt is actually sent). */
   vars: Record<string, string>;
   globals: Record<string, string>;
+  /** How many older messages were left out because the story so far covers them. */
+  summarized: number;
 }
 
 export interface PromptInput {
@@ -74,6 +83,8 @@ export interface PromptInput {
   /** Every card a block points at, by id. */
   cards: Map<string, Card>;
   messages: Message[];
+  /** The seq of the last message the "Story so far" note covers (0 or left out: none). */
+  summaryThrough?: number;
   vars?: Record<string, string>;
   globals?: Record<string, string>;
   now?: Date;
@@ -107,9 +118,14 @@ interface Item {
 
 export function assemblePrompt(input: PromptInput): AssembledPrompt {
   const { persona, characters } = castOf(input.blocks, input.cards);
-  const history = input.messages.filter((m) => m.content.trim());
+  const whole = input.messages.filter((m) => m.content.trim());
+  const note = input.blocks.find((b) => b.kind === "note" && b.title === SUMMARY_NOTE);
+  const through = note?.enabled && note.content.trim() ? (input.summaryThrough ?? 0) : 0;
+  // Never everything: the last message always goes, whatever the summary says.
+  const history = through ? whole.filter((m, i) => m.seq > through || i === whole.length - 1) : whole;
+  const summarized = whole.length - history.length;
   const userName = persona?.name ?? "User";
-  const lastOf = (role?: Message["role"]) => [...history].reverse().find((m) => !role || m.role === role)?.content ?? "";
+  const lastOf = (role?: Message["role"]) => [...whole].reverse().find((m) => !role || m.role === role)?.content ?? "";
   const env: MacroEnv = {
     user: userName,
     char: characters[0]?.name ?? "",
@@ -117,8 +133,8 @@ export function assemblePrompt(input: PromptInput): AssembledPrompt {
     lastMessage: lastOf(),
     lastUserMessage: lastOf("user"),
     lastCharMessage: lastOf("assistant"),
-    messageCount: history.length,
-    lastUserPost: latestUserPost(history),
+    messageCount: whole.length,
+    lastUserPost: latestUserPost(whole),
     now: input.now ?? new Date(),
     vars: { ...input.vars },
     globals: { ...input.globals },
@@ -163,7 +179,7 @@ export function assemblePrompt(input: PromptInput): AssembledPrompt {
 
   // Most models need something after the system prompt to answer. With no
   // messages yet, this says so out loud instead of sending a hidden nudge.
-  if (history.length === 0) items.push({ label: "Start (no messages yet)", source: "start", role: "user", text: "(Begin the scene.)" });
+  if (whole.length === 0) items.push({ label: "Start (no messages yet)", source: "start", role: "user", text: "(Begin the scene.)" });
 
   // Headings, then macros, in send order.
   const sent: SentBlock[] = [];
@@ -186,7 +202,7 @@ export function assemblePrompt(input: PromptInput): AssembledPrompt {
     else messages.push({ role: b.role, content: b.content });
   }
   const chars = messages.reduce((n, m) => n + m.content.length, 0);
-  return { blocks: sent, messages, approxTokens: Math.round(chars / 4), vars: env.vars, globals: env.globals };
+  return { blocks: sent, messages, approxTokens: Math.round(chars / 4), vars: env.vars, globals: env.globals, summarized };
 }
 
 /**

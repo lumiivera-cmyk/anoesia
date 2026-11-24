@@ -233,6 +233,17 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE agent_messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE agent_edits ADD COLUMN set_aside INTEGER NOT NULL DEFAULT 0;
   `,
+
+  // 12: the story so far. A chat's "Story so far" note stands in for its
+  // older messages (src/summary.ts): how far it reaches (the seq of the
+  // last message folded in), a fingerprint of those messages, how many of
+  // the latest go word for word, and whether it folds on its own.
+  `
+  ALTER TABLE chats ADD COLUMN summary_through INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chats ADD COLUMN summary_hash TEXT NOT NULL DEFAULT '';
+  ALTER TABLE chats ADD COLUMN summary_keep INTEGER NOT NULL DEFAULT 50;
+  ALTER TABLE chats ADD COLUMN summary_auto INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */

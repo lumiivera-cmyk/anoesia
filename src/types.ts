@@ -80,8 +80,22 @@ export interface Chat {
    * sent, and `{{cast}}` leaves them out. Everyone else is onstage.
    */
   offstage: string[];
+  /** How far its "Story so far" note reaches, and how it folds (src/summary.ts). */
+  summary: ChatSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A chat's summary settings and reach. The summary's text is its "Story so far" note. */
+export interface ChatSummary {
+  /** The seq of the last message folded into the note (0: none). Messages up to it are left out of the prompt while the note has text. */
+  through: number;
+  /** A fingerprint of the folded messages as they were folded, to notice later edits. */
+  hash: string;
+  /** How many of the latest messages always go word for word. */
+  keep: number;
+  /** Fold on its own after a reply, once enough messages wait. */
+  auto: boolean;
 }
 
 /** Who wrote a message: `user`, `narrator`, or a card id (classic group chat, later). */
@@ -90,6 +104,8 @@ export type Author = string;
 export interface Message {
   id: string;
   chatId: string;
+  /** Its place in the chat (gaps are fine: a deleted message leaves one). */
+  seq: number;
   role: "user" | "assistant";
   /** v1 always records `narrator` for replies and `user` for yours. */
   author: Author;
@@ -113,6 +129,8 @@ export interface Message {
 export interface StoryState {
   notes: Record<string, string>;
   offstage: string[];
+  /** How far the summary reached (missing in stories saved before summaries). */
+  summary?: { through: number; hash: string };
 }
 
 /** App-wide settings. */

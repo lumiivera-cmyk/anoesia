@@ -279,7 +279,7 @@ export class Workspace {
         const names = (ids: string[]) => ids.map((id) => cards.get(id) ?? id).join(", ") || "nobody";
         return [
           { path: `chats/${chat.name}/messages/`, note: `${count} messages` },
-          { path: `chats/${chat.name}/blocks/`, note: "its prompt, block by block, with its notes (Right now, Who knows what)" },
+          { path: `chats/${chat.name}/blocks/`, note: "its prompt, block by block, with its notes (Story so far, Right now, Who knows what)" },
           { path: `chats/${chat.name}/cast`, note: `onstage: ${names(chat.cast.filter((id) => !chat.offstage.includes(id)))}; offstage: ${names(chat.offstage)}` },
           { path: `agent/chats/${chat.name}/`, note: "your folder for this chat" },
         ];

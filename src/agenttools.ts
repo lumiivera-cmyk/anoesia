@@ -284,7 +284,8 @@ const TOOLS: Record<string, (args: Args, env: ToolEnv) => ToolResult> = {
       const cut = b.source.startsWith("message:") && !keepFull.has(b) && b.content.length > 300 ? b.content.slice(0, 300) + " …(cut)" : b.content;
       return `[${i + 1}] ${b.label} (${b.role}${where})\n${cut}`;
     });
-    return { text: `About ${prompt.approxTokens} tokens in ${prompt.messages.length} messages.\n\n${parts.join("\n\n")}` };
+    const folded = prompt.summarized ? ` The ${prompt.summarized} oldest chat messages aren't sent: the "Story so far" note stands in for them.` : "";
+    return { text: `About ${prompt.approxTokens} tokens in ${prompt.messages.length} messages.${folded}\n\n${parts.join("\n\n")}` };
   },
 
   resolve_macros(args, env) {
@@ -340,5 +341,5 @@ function buildPreview(env: ToolEnv, chatId: string, extra?: PromptBlock) {
   const store = env.ws.store;
   const blocks = store.blocks(chatId);
   if (extra) blocks.push(extra);
-  return assemblePrompt({ blocks, cards: new Map(store.cards().map((c) => [c.id, c])), messages: store.messages(chatId), vars: store.vars(chatId), globals: store.vars("global") });
+  return assemblePrompt({ blocks, cards: new Map(store.cards().map((c) => [c.id, c])), messages: store.messages(chatId), summaryThrough: store.chat(chatId).summary.through, vars: store.vars(chatId), globals: store.vars("global") });
 }

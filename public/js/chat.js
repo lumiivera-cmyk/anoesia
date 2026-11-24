@@ -62,6 +62,7 @@ export async function openChat(id) {
 function applyView(view, draw = true) {
   state.chat = view.chat;
   state.messages = view.messages;
+  state.summary = view.summary ?? null;
   state.busy = view.busy;
   if (!view.busy) state.live = null;
   if (view.error) state.replyError = view.error;
@@ -141,7 +142,10 @@ function renderMessages(scrollToEnd) {
     return;
   }
   const lastReply = state.messages.at(-1)?.role === "assistant" ? state.messages.at(-1) : null;
-  let html = state.messages.map((m) => messageHtml(m, m === lastReply)).join("");
+  // Where the story so far ends: the messages above the line reach the narrator only through it.
+  const through = state.summary?.sent ? state.summary.through : 0;
+  const last = state.messages.at(-1);
+  let html = state.messages.map((m) => messageHtml(m, m === lastReply) + (through && m.seq <= through && m !== last && state.messages[state.messages.indexOf(m) + 1]?.seq > through ? foldLineHtml() : "")).join("");
   if (state.busy) html += liveHtml();
   if (!html) {
     const castEmpty = !state.chat.cast.length;
@@ -152,6 +156,12 @@ function renderMessages(scrollToEnd) {
   box.innerHTML = html;
   if (state.busy) drawLive();
   if (scrollToEnd || atEnd) scroller.scrollTop = scroller.scrollHeight;
+}
+
+/** The line under the last message the story so far covers. */
+function foldLineHtml() {
+  const n = state.summary.covered;
+  return `<div class="fold-line" title="The ${n} messages above reach the narrator through the Story so far note"><span class="meta">above: told by <button type="button" class="linkish press" data-open-scene>Story so far</button>, not sent word for word${state.summary.stale ? " · check it" : ""}</span></div>`;
 }
 
 // ------------------------------------------------------------ the live reply
@@ -367,6 +377,7 @@ function messageHtml(m, isLastReply) {
 async function onMessageClick(event) {
   if (event.target.closest("[data-empty-new]")) return newChat();
   if (event.target.closest("[data-empty-cast]")) return openChatSettings(event.target.closest("button"));
+  if (event.target.closest("[data-open-scene]")) return openScene($("open-scene"));
   // Opening or reading the reasoning isn't a tap on the message.
   if (event.target.closest(".thinking")) {
     if (event.target.closest("[data-live-thinking] summary")) foldTouched = true;
@@ -660,6 +671,12 @@ export function wireChat() {
     if (await toggleStage(id)) $("cast-chips").querySelector(`[data-chip="${CSS.escape(id)}"]`)?.focus();
   });
   document.addEventListener("anoesia:stage-changed", () => renderChat());
+  // Folding, start over, or "it fits" in the scene menu: the line in the chat moves.
+  document.addEventListener("anoesia:summary-changed", (e) => {
+    if (!state.chat || e.detail?.noteId === undefined) return;
+    state.summary = e.detail;
+    renderChat();
+  });
   $("composer").addEventListener("submit", send);
   $("continue").addEventListener("click", () => {
     if (!state.busy && state.chatId) run("send", { content: "" });

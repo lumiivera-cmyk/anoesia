@@ -14,6 +14,7 @@ import { ApiError, CancelledError, createChatCompletion, listModels, streamChatC
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { NUDGES } from "./nudges.ts";
+import { FOLD_BATCH, foldMessages, foldStatus, nextFold } from "./summary.ts";
 import { branch, editText, prepareTurn, rewind, rewindCount, setAsideLastAnswer, switchVersion } from "./agent.ts";
 import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
@@ -95,6 +96,7 @@ export function createApp(config: Config): App {
         const reply = await generate(chatId, live, history);
         if (last) store.addSwipe(last.id, reply.content, reply.profileId, reply.model, reply.reasoning);
         else store.addMessage({ chatId, role: "assistant", author: "narrator", ...reply });
+        foldSoon(chatId);
       } catch (error) {
         if (!(error instanceof ApiError || error instanceof ValidationError || error instanceof CancelledError)) console.error(error);
         outcome = { error: errorMessage(error) };
@@ -293,7 +295,77 @@ export function createApp(config: Config): App {
   function buildPrompt(chatId: string, history?: Message[]) {
     const blocks = store.blocks(chatId);
     const cards = new Map(store.cards().map((c) => [c.id, c]));
-    return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), vars: store.vars(chatId), globals: store.vars("global") });
+    const summaryThrough = store.chat(chatId).summary.through;
+    return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), summaryThrough, vars: store.vars(chatId), globals: store.vars("global") });
+  }
+
+  // ------------------------------------------------------- the story so far
+
+  /** The summary being written in each chat (one at a time), and the last one's error. */
+  const folding = new Map<string, Promise<void>>();
+  const foldErrors = new Map<string, string>();
+
+  /**
+   * Fold a chat's older messages into its "Story so far" note
+   * (src/summary.ts): everything past the messages kept word for word, a
+   * chunk per request, each part saved as it arrives. Written by the RP
+   * profile. A part whose messages changed meanwhile (rewound, edited) is
+   * dropped, and folding stops there. Errors are kept for the scene menu.
+   */
+  function fold(chatId: string): Promise<void> {
+    const already = folding.get(chatId);
+    if (already) return already;
+    const job = (async () => {
+      foldErrors.delete(chatId);
+      try {
+        for (let round = 0; round < 50; round++) {
+          const chat = store.chat(chatId);
+          const batch = nextFold(chat, store.messages(chatId));
+          if (!batch.length) return;
+          const settings = store.settings();
+          if (!settings.rpProfileId) throw new ValidationError("Pick a connection profile first (Settings → Connections).");
+          const profile = store.profile(settings.rpProfileId);
+          if (!profile.model) throw new ValidationError(`The profile "${profile.name}" has no model yet.`);
+          const cards = chat.cast.map((id) => store.card(id));
+          const persona = cards.find((c) => c.isPersona);
+          const result = await createChatCompletion(api, {
+            model: profile.model,
+            provider: profile.provider,
+            messages: foldMessages({ summary: store.summaryNote(chatId).content, batch, userName: persona?.name ?? "User", cast: cards.filter((c) => !c.isPersona && c.isCharacter).map((c) => c.name) }),
+            // A summary wants to be faithful more than surprising.
+            temperature: Math.min(profile.temperature, 0.7),
+            maxTokens: Math.max(profile.maxTokens, 2000),
+            topP: profile.topP,
+            minP: profile.minP,
+            reasoningEffort: profile.reasoningEffort,
+            extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Json) : undefined,
+          });
+          const part = cleanReply(result.content);
+          if (!part) throw new ApiError("The model returned an empty summary.");
+          if (!store.foldIn(chatId, chat.summary.through, batch, part)) return;
+        }
+      } catch (error) {
+        if (!(error instanceof ApiError || error instanceof ValidationError || error instanceof NotFoundError)) console.error(error);
+        foldErrors.set(chatId, errorMessage(error));
+      } finally {
+        folding.delete(chatId);
+      }
+    })();
+    folding.set(chatId, job);
+    return job;
+  }
+
+  /** After a reply: fold on its own, when the chat does and enough messages are waiting. */
+  function foldSoon(chatId: string): void {
+    const chat = store.chat(chatId);
+    if (!chat.summary.auto || folding.has(chatId)) return;
+    if (foldStatus(chat, store.messages(chatId)).waiting >= FOLD_BATCH) void fold(chatId);
+  }
+
+  /** How the summary stands, for the scene menu and the chat. */
+  function summaryView(chatId: string) {
+    const note = store.summaryNote(chatId);
+    return { ...foldStatus(store.chat(chatId), store.messages(chatId)), batch: FOLD_BATCH, noteId: note.id, sent: note.enabled && Boolean(note.content.trim()), folding: folding.has(chatId), error: foldErrors.get(chatId) ?? "" };
   }
 
   function editView(e: AgentEdit) {
@@ -321,7 +393,7 @@ export function createApp(config: Config): App {
   }
 
   function chatView(chatId: string) {
-    return { chat: store.chat(chatId), messages: store.messages(chatId), busy: running.has(chatId) };
+    return { chat: store.chat(chatId), messages: store.messages(chatId), busy: running.has(chatId), summary: summaryView(chatId) };
   }
 
   /** A reply's answer to a plain (not streamed) request: the chat once the reply is saved, or with the error. */
@@ -488,6 +560,21 @@ export function createApp(config: Config): App {
       if (running.has(chatId)) throw new ValidationError("A reply is still being written. Stop it first, then rewind.");
       const outcome = store.rewindChat(chatId, b.messageId);
       return json({ ...chatView(chatId), ...outcome });
+    }
+    // The story so far: how it stands, fold now, the folded messages are fine as they are, start over.
+    if ((p = m("/api/chats/:id/summary")) && method === "GET") return json(summaryView(p[0]!));
+    if ((p = m("/api/chats/:id/summary/fold")) && method === "POST") {
+      await fold(p[0]!);
+      return json({ ...summaryView(p[0]!), note: store.summaryNote(p[0]!) });
+    }
+    if ((p = m("/api/chats/:id/summary/checked")) && method === "POST") {
+      store.summaryChecked(p[0]!);
+      return json({ ...summaryView(p[0]!), note: store.summaryNote(p[0]!) });
+    }
+    if ((p = m("/api/chats/:id/summary/reset")) && method === "POST") {
+      if (folding.has(p[0]!)) throw new ValidationError("The summary is being written. Wait for it to finish, then start over.");
+      store.resetSummary(p[0]!);
+      return json({ ...summaryView(p[0]!), note: store.summaryNote(p[0]!) });
     }
     if ((p = m("/api/chats/:id/stop")) && method === "POST") {
       running.get(p[0]!)?.controller.abort();

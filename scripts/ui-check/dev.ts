@@ -64,6 +64,11 @@ if (!process.env.EMPTY) {
   await call("PATCH", `/api/cards/${id("Bo")}`, { colour: "pink" });
   await call("PATCH", `/api/cards/${id("Cy")}`, { colour: "#4FD1A5" });
   const me = await call("POST", "/api/cards", { name: "Hana", isPersona: true, fields: [{ key: "description", content: "A new trainee." }] });
+  // A long chat, its older messages folded into the story so far (made first, so Backstage stays the latest).
+  const long = await call("POST", "/api/chats", { name: "Long run", cast: [id("Old Town"), me.id, id("Ada")] });
+  for (let i = 1; i <= 14; i++) await call("POST", `/api/chats/${long.id}/send`, { content: `Turn ${i}. Hana runs the scales again, slower this time.` });
+  await call("PATCH", `/api/chats/${long.id}`, { summaryKeep: 10 });
+  await call("POST", `/api/chats/${long.id}/summary/fold`);
   const chat = await call("POST", "/api/chats", { name: "Backstage", cast: [id("Old Town"), id("The Night Market"), id("Bo"), id("Cy"), me.id, id("Ada")] });
   for (const t of ["*Hana knocks on the green room door.*", "Is this a bad time?", "I brought the new setlist."]) await call("POST", `/api/chats/${chat.id}/send`, { content: t });
   await call("POST", `/api/chats/${chat.id}/regenerate`, {});

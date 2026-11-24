@@ -299,8 +299,8 @@ describe("the prompts page", () => {
     await call("PATCH", `/api/chats/${chat.id}`, { cast: [...cast.filter((id) => id !== cast[2]), extra.id] });
     let blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
     // Just before the history, ahead of the chat's notes.
-    expect(blocks.slice(-4).map((b: any) => b.title)).toEqual(["System prompt", "Right now", "Who knows what", "Chat history"]);
-    expect(blocks.at(-4)).toMatchObject({ cardId: extra.id });
+    expect(blocks.slice(-5).map((b: any) => b.title)).toEqual(["System prompt", "Story so far", "Right now", "Who knows what", "Chat history"]);
+    expect(blocks.at(-5)).toMatchObject({ cardId: extra.id });
     expect(blocks.some((b: any) => b.cardId === cast[2])).toBe(false);
 
     const ada = (await call("GET", "/api/state")).data.cards.find((c: any) => c.id === cast[5]);
@@ -354,11 +354,12 @@ describe("cast presence", () => {
 });
 
 describe("chat notes", () => {
-  test("a new chat has both notes, empty and left out of the preview; filled, one is sent", async () => {
+  test("a new chat has its notes, empty and left out of the preview; filled, one is sent", async () => {
     const { chat } = await setUp();
     const blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
     const notes = blocks.filter((b: any) => b.kind === "note");
     expect(notes.map((b: any) => [b.title, b.content, b.role])).toEqual([
+      ["Story so far", "", "system"],
       ["Right now", "", "system"],
       ["Who knows what", "", "system"],
     ]);
@@ -366,7 +367,7 @@ describe("chat notes", () => {
     let preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
     expect(preview.blocks.some((b: any) => b.label === "Right now" || b.label === "Who knows what")).toBe(false);
 
-    await call("PATCH", `/api/blocks/${notes[0].id}`, { content: "Backstage after the show. {{user}} has the setlist." });
+    await call("PATCH", `/api/blocks/${notes[1].id}`, { content: "Backstage after the show. {{user}} has the setlist." });
     preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
     expect(preview.blocks.find((b: any) => b.label === "Right now").content).toBe("## Right now\n\nBackstage after the show. Hana has the setlist.");
     expect(preview.blocks.some((b: any) => b.label === "Who knows what")).toBe(false);
@@ -407,7 +408,7 @@ describe("cards", () => {
     const moved = (await call("PATCH", `/api/cards/${card.id}`, { fields: [sys, desc, custom, adv] })).data;
     expect(moved.fields.map((f: any) => f.key)).toEqual(["system", "description", "custom", "advanced"]);
     blocks = (await call("GET", `/api/chats/${chat.id}/blocks`)).data;
-    expect(blocks.map((b: any) => b.title)).toEqual(["Main prompt", "System prompt", "Description", "Advanced description", "Right now", "Who knows what", "Chat history", "Voice bank"]);
+    expect(blocks.map((b: any) => b.title)).toEqual(["Main prompt", "System prompt", "Description", "Advanced description", "Story so far", "Right now", "Who knows what", "Chat history", "Voice bank"]);
   });
 
   test("a card's colour is a preset or a hex, and a custom colour is remembered", async () => {
@@ -728,5 +729,126 @@ describe("streaming a reply", () => {
     await Bun.sleep(20);
     expect((await call("POST", `/api/chats/${chat.id}/send?stream=1`, {})).status).toBe(400);
     await (await first).text();
+  });
+});
+
+describe("the story so far", () => {
+  /** A chat with `n` messages, yours and the narrator's in turn. */
+  async function longChat(n: number) {
+    const { chat } = await setUp();
+    for (let i = 1; i <= n; i++) app.store.addMessage({ chatId: chat.id, role: i % 2 ? "user" : "assistant", author: i % 2 ? "user" : "narrator", content: `Line ${i}.` });
+    return chat;
+  }
+  const summary = async (id: string) => (await call("GET", `/api/chats/${id}/summary`)).data;
+  const sentLines = (preview: any) => preview.blocks.filter((b: any) => b.source.startsWith("message:")).map((b: any) => b.content);
+
+  test("with no summary every message goes; folding leaves out the ones it covers and sends the note instead", async () => {
+    const chat = await longChat(30);
+    await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 10 });
+    let preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    expect(sentLines(preview)).toHaveLength(30);
+    expect(preview.summarized).toBe(0);
+    expect(await summary(chat.id)).toMatchObject({ covered: 0, waiting: 20, keep: 10, auto: true, sent: false, stale: false });
+
+    reply = "Hana joined the company. The first rehearsal went badly, then well.";
+    const folded = (await call("POST", `/api/chats/${chat.id}/summary/fold`)).data;
+    expect(folded).toMatchObject({ covered: 20, waiting: 0, sent: true, error: "" });
+    expect(folded.note.content).toBe(reply);
+    // The request: the instructions, then the summary so far and the messages to fold.
+    const asked = received.at(-1)!.messages;
+    expect(asked[0]!.content).toContain("Close out what is closed");
+    expect(asked[1]!.content).toContain("Hana: Line 1.");
+    expect(asked[1]!.content).toContain("Narrator: Line 20.");
+    expect(asked[1]!.content).not.toContain("Line 21.");
+
+    preview = (await call("GET", `/api/chats/${chat.id}/preview`)).data;
+    expect(sentLines(preview)).toEqual(Array.from({ length: 10 }, (_, i) => `Line ${i + 21}.`));
+    expect(preview.summarized).toBe(20);
+    expect(preview.blocks.find((b: any) => b.label === "Story so far").content).toBe(`## Story so far\n\n${reply}`);
+
+    // A second fold adds to the end, after what you wrote in it.
+    await call("PATCH", `/api/blocks/${folded.note.id}`, { content: `${reply}\n\nAlso: Bo owes Hana a coffee.` });
+    for (let i = 31; i <= 40; i++) app.store.addMessage({ chatId: chat.id, role: i % 2 ? "user" : "assistant", author: i % 2 ? "user" : "narrator", content: `Line ${i}.` });
+    reply = "They toured the night market.";
+    const again = (await call("POST", `/api/chats/${chat.id}/summary/fold`)).data;
+    expect(again.covered).toBe(30);
+    expect(again.note.content).toBe("Hana joined the company. The first rehearsal went badly, then well.\n\nAlso: Bo owes Hana a coffee.\n\nThey toured the night market.");
+    expect(received.at(-1)!.messages[1]!.content).toContain("Also: Bo owes Hana a coffee.");
+
+    // Switched off, or emptied, the note leaves nothing out.
+    await call("PATCH", `/api/blocks/${folded.note.id}`, { enabled: false });
+    expect(sentLines((await call("GET", `/api/chats/${chat.id}/preview`)).data)).toHaveLength(40);
+  });
+
+  test("an edit to a folded message marks the summary to check; checked, it's fine again; start over sends everything", async () => {
+    const chat = await longChat(12);
+    await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 4 });
+    await call("POST", `/api/chats/${chat.id}/summary/fold`);
+    const messages = app.store.messages(chat.id);
+    await call("PATCH", `/api/messages/${messages[2]!.id}`, { content: "Line 3, retold." });
+    expect((await summary(chat.id)).stale).toBe(true);
+    expect((await call("POST", `/api/chats/${chat.id}/summary/checked`)).data.stale).toBe(false);
+    const reset = (await call("POST", `/api/chats/${chat.id}/summary/reset`)).data;
+    expect(reset).toMatchObject({ covered: 0, sent: false });
+    expect(reset.note.content).toBe("");
+    expect(sentLines((await call("GET", `/api/chats/${chat.id}/preview`)).data)).toHaveLength(12);
+  });
+
+  test("rewind and branch take the summary back to how it stood at that message", async () => {
+    const chat = await longChat(12);
+    await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 4 });
+    reply = "Folded: lines 1 to 8.";
+    await call("POST", `/api/chats/${chat.id}/summary/fold`);
+    app.store.addMessage({ chatId: chat.id, role: "user", author: "user", content: "Line 13." });
+    app.store.addMessage({ chatId: chat.id, role: "assistant", author: "narrator", content: "Line 14." });
+    const all = app.store.messages(chat.id);
+
+    // Branch from line 13 (after the fold): the branch has the summary too, still reaching line 8.
+    const later = (await call("POST", `/api/chats/${chat.id}/branch`, { messageId: all[12]!.id })).data;
+    expect(later.summary).toMatchObject({ covered: 8, stale: false, sent: true });
+    expect(sentLines((await call("GET", `/api/chats/${later.chat.id}/preview`)).data)).toEqual(["Line 9.", "Line 10.", "Line 11.", "Line 12.", "Line 13."]);
+
+    // Branch from line 5 (before it): no summary there.
+    const early = (await call("POST", `/api/chats/${chat.id}/branch`, { messageId: all[4]!.id })).data;
+    expect(early.summary).toMatchObject({ covered: 0, sent: false });
+
+    // Rewind to line 12 (the latest when it was folded): the summary stays.
+    let rewound = (await call("POST", `/api/chats/${chat.id}/rewind`, { messageId: all[11]!.id })).data;
+    expect(rewound.summary).toMatchObject({ covered: 8, sent: true });
+    // Rewind to line 6: what was folded after it is gone with it.
+    rewound = (await call("POST", `/api/chats/${chat.id}/rewind`, { messageId: all[5]!.id })).data;
+    expect(rewound.summary).toMatchObject({ covered: 0, sent: false });
+    expect(app.store.summaryNote(chat.id).content).toBe("");
+    // New messages aren't covered by an old reach.
+    app.store.addMessage({ chatId: chat.id, role: "assistant", author: "narrator", content: "A new line 7." });
+    expect(sentLines((await call("GET", `/api/chats/${chat.id}/preview`)).data)).toHaveLength(7);
+  });
+
+  test("deleting the last folded message keeps the reach on the messages that are left", async () => {
+    const chat = await longChat(8);
+    await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 4 });
+    await call("POST", `/api/chats/${chat.id}/summary/fold`);
+    const all = app.store.messages(chat.id);
+    for (const m of all.slice(2)) await call("DELETE", `/api/messages/${m.id}`);
+    expect(await summary(chat.id)).toMatchObject({ covered: 2, stale: true });
+    app.store.addMessage({ chatId: chat.id, role: "user", author: "user", content: "Fresh." });
+    expect(sentLines((await call("GET", `/api/chats/${chat.id}/preview`)).data)).toEqual(["Fresh."]);
+  });
+
+  test("after a reply it folds on its own once enough wait past the kept ones, unless switched off", async () => {
+    const chat = await longChat(24);
+    await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 4, summaryAuto: false });
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Line 25." });
+    expect((await summary(chat.id)).covered).toBe(0);
+    await call("PATCH", `/api/chats/${chat.id}`, { summaryAuto: true });
+    await call("POST", `/api/chats/${chat.id}/send`, { content: "Line 27." });
+    for (let i = 0; i < 50 && (await summary(chat.id)).folding; i++) await Bun.sleep(10);
+    expect(await summary(chat.id)).toMatchObject({ covered: 24, waiting: 0, sent: true });
+  });
+
+  test("how many stay word for word is checked", async () => {
+    const { chat } = await setUp();
+    expect((await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 2 })).status).toBe(400);
+    expect((await call("PATCH", `/api/chats/${chat.id}`, { summaryKeep: 60 })).data.summary).toMatchObject({ keep: 60, auto: true, through: 0 });
   });
 });
