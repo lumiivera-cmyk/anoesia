@@ -596,6 +596,18 @@ dialog.mpick[open]{display:flex}
 .agent-options{display:grid;gap:6px}.agent-option{display:flex;flex-direction:column;text-align:left}
 .agent-error{padding:8px;color:var(--danger-ink)}
 .agent-live{margin:10px 0}.agent-live .agent-msg{margin-top:4px}.agent-live .thinking{margin:2px 0 6px}
+.agent-acts{display:none;align-items:center;gap:2px;margin:2px 0 6px;color:var(--ink-4)}
+.agent-acts.shown,.agent-run:hover>.agent-acts,.agent-ex-user:hover>.agent-acts,.agent-acts:focus-within,.show-acts>.agent-acts{display:flex}
+.agent-ex-user .agent-acts{justify-content:flex-end}.agent-ex-user .agent-acts .spacer{display:none}
+.agent-acts .spacer{flex:1}
+.agent-act{width:36px;height:36px;border-radius:10px;color:var(--ink-4)}
+.agent-act:hover{color:var(--ink-1)}
+.agent-acts .versions{margin-left:0}
+@media (pointer:coarse){.agent-act,.agent-acts .versions .ib{width:44px;height:44px}}
+.agent-msg.editing{white-space:normal}
+.agent-edit-form{display:grid;gap:8px}
+.agent-edit-form textarea{width:100%;box-sizing:border-box;min-height:70px;padding:10px;border-radius:10px;background:var(--sunk-bg);color:var(--ink-1);border:1px solid rgba(255,255,255,.14);font:inherit;resize:vertical}
+.agent-edit-form .row{display:flex;justify-content:flex-end;gap:8px}
 .agent-live-status{font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;font-weight:700}
 @media(max-width:899px){.agent-panel{width:100vw;padding:12px}}
 .agent-edit-head button{white-space:nowrap;flex-shrink:0}

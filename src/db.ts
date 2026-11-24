@@ -226,6 +226,13 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE prompt_blocks ADD COLUMN nudge INTEGER NOT NULL DEFAULT 0;
   UPDATE prompt_blocks SET nudge = 1 WHERE kind = 'text' AND role = 'user' AND depth = 0;
   `,
+  // 11: rerolls in the agent chat. A rerolled answer's messages stay as an
+  // earlier version (hidden: not shown, not sent), and the changes it made
+  // are reverted and set aside, so switching back to it puts them back.
+  `
+  ALTER TABLE agent_messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE agent_edits ADD COLUMN set_aside INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 /** Open (or create) the database at `path` and bring its layout up to date. */
