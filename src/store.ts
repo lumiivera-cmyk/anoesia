@@ -9,6 +9,7 @@ import type { Database } from "bun:sqlite";
 import { DEFAULT_FIELDS, type ParsedCard } from "./cards.ts";
 import { NotFoundError, ValidationError, newId } from "./errors.ts";
 import { CHAT_NOTES, DEFAULT_MAIN_PROMPT } from "./prompt.ts";
+import { MAX_KEEP, MIN_KEEP, SUMMARY_NOTE, appendPart, coverHash } from "./summary.ts";
 import type { Background, BlockKind, StoryState, Card, CardField, Chat, FieldKey, Finish, Message, Photo, Profile, PromptBlock, ProviderId, ReasoningEffort, Settings } from "./types.ts";
 
 const now = () => new Date().toISOString();
@@ -338,6 +339,7 @@ export class Store {
       name: row.name as string,
       cast: rows.map((c) => c.card_id),
       offstage: rows.filter((c) => !c.onstage).map((c) => c.card_id),
+      summary: { through: Number(row.summary_through ?? 0), hash: String(row.summary_hash ?? ""), keep: Number(row.summary_keep ?? 50), auto: Boolean(row.summary_auto ?? 1) },
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
     };
@@ -356,6 +358,15 @@ export class Store {
     if (raw.name !== undefined) this.db.query("UPDATE chats SET name = ? WHERE id = ?").run(cleanName(raw.name), id);
     if (raw.cast !== undefined) this.setCast(id, raw.cast);
     if (raw.offstage !== undefined) this.setOffstage(id, raw.offstage);
+    if (raw.summaryKeep !== undefined) {
+      const keep = Number(raw.summaryKeep);
+      if (!Number.isInteger(keep) || keep < MIN_KEEP || keep > MAX_KEEP) throw new ValidationError(`Keep ${MIN_KEEP} to ${MAX_KEEP} of the latest messages word for word.`);
+      this.db.query("UPDATE chats SET summary_keep = ? WHERE id = ?").run(keep, id);
+    }
+    if (raw.summaryAuto !== undefined) {
+      if (typeof raw.summaryAuto !== "boolean") throw new ValidationError("summaryAuto must be true or false.");
+      this.db.query("UPDATE chats SET summary_auto = ? WHERE id = ?").run(raw.summaryAuto ? 1 : 0, id);
+    }
     void chat;
     return this.chat(id);
   }
@@ -450,7 +461,10 @@ export class Store {
     // Its notes, once each (a chat from before notes gets them just before the history).
     const notes = new Set((this.db.query("SELECT title FROM prompt_blocks WHERE chat_id = ? AND kind = 'note'").all(chat.id) as { title: string }[]).map((r) => r.title));
     const missing = CHAT_NOTES.filter((t) => !notes.has(t));
-    if (missing.length) blocks.splice(blocks.findIndex((b) => b.kind === "history"), 0, ...missing.map((title) => ({ id: newId(), kind: "note", title, card_id: null, field_id: null, new: true })));
+    // They go just before the history, ahead of the notes already there (the story so far reads before where it stands now).
+    let notesAt = blocks.findIndex((b) => b.kind === "history");
+    while (notesAt > 0 && blocks[notesAt - 1]!.kind === "note") notesAt--;
+    if (missing.length) blocks.splice(notesAt, 0, ...missing.map((title) => ({ id: newId(), kind: "note", title, card_id: null, field_id: null, new: true })));
     // Fields with no block yet.
     for (const cardId of chat.cast) {
       for (const f of this.card(cardId).fields) {
@@ -633,8 +647,10 @@ export class Store {
 
   /** The chat's notes and who's offstage, as they are now. */
   private storyNow(chatId: string): StoryState {
+    this.blocks(chatId); // makes sure every note exists, so each is saved
     const notes = this.db.query("SELECT title, content FROM prompt_blocks WHERE chat_id = ? AND kind = 'note'").all(chatId) as { title: string; content: string }[];
-    return { notes: Object.fromEntries(notes.map((n) => [n.title, n.content])), offstage: this.chat(chatId).offstage };
+    const chat = this.chat(chatId);
+    return { notes: Object.fromEntries(notes.map((n) => [n.title, n.content])), offstage: chat.offstage, summary: { through: chat.summary.through, hash: chat.summary.hash } };
   }
 
   /** The story saved at a message, or null (it's the latest, or from before stories were saved). */
@@ -643,7 +659,8 @@ export class Store {
     if (!row?.story) return null;
     try {
       const parsed = JSON.parse(row.story) as StoryState;
-      return { notes: parsed.notes ?? {}, offstage: Array.isArray(parsed.offstage) ? parsed.offstage : [] };
+      const summary = parsed.summary && Number.isInteger(parsed.summary.through) ? { through: parsed.summary.through, hash: String(parsed.summary.hash ?? "") } : undefined;
+      return { notes: parsed.notes ?? {}, offstage: Array.isArray(parsed.offstage) ? parsed.offstage : [], ...(summary ? { summary } : {}) };
     } catch {
       return null;
     }
@@ -656,6 +673,67 @@ export class Store {
     for (const [title, content] of Object.entries(story.notes)) update.run(content, chatId, title);
     const cast = this.chat(chatId).cast;
     this.setOffstage(chatId, story.offstage.filter((id) => cast.includes(id)));
+    if (story.summary) this.db.query("UPDATE chats SET summary_through = ?, summary_hash = ? WHERE id = ?").run(story.summary.through, story.summary.hash, chatId);
+  }
+
+  /**
+   * After messages went (rewind, branch): a summary that reaches past the
+   * last message tells of things that are gone, so it's emptied. (Only a
+   * story saved before summaries existed can leave it like that.)
+   */
+  private dropSummaryPast(chatId: string, seq: number): void {
+    if (this.chat(chatId).summary.through <= seq) return;
+    this.db.query("UPDATE chats SET summary_through = 0, summary_hash = '' WHERE id = ?").run(chatId);
+    this.db.query("UPDATE prompt_blocks SET content = '' WHERE chat_id = ? AND kind = 'note' AND title = ?").run(chatId, SUMMARY_NOTE);
+  }
+
+  // ------------------------------------------------------------ the story so far
+
+  /** The chat's "Story so far" note. */
+  summaryNote(chatId: string): PromptBlock {
+    return this.blocks(chatId).find((b) => b.kind === "note" && b.title === SUMMARY_NOTE)!;
+  }
+
+  /**
+   * Add a folded part to the summary: `part` goes at the end of the note as
+   * it is now, and the summary reaches through the last of `batch`. Only if
+   * nothing moved meanwhile: the summary still reaches where it did
+   * (`from`), and the batch's messages are still the chat's, unchanged.
+   * Returns whether it was saved.
+   */
+  foldIn(chatId: string, from: number, batch: Message[], part: string): boolean {
+    let ok = false;
+    this.db.transaction(() => {
+      const chat = this.chat(chatId);
+      if (chat.summary.through !== from || !batch.length) return;
+      const messages = this.messages(chatId);
+      const upTo = batch.at(-1)!.seq;
+      const now = messages.filter((m) => m.seq > from && m.seq <= upTo);
+      if (coverHash(now) !== coverHash(batch)) return;
+      const note = this.summaryNote(chatId);
+      this.db.query("UPDATE prompt_blocks SET content = ? WHERE id = ?").run(appendPart(note.content, part), note.id);
+      this.db.query("UPDATE chats SET summary_through = ?, summary_hash = ? WHERE id = ?").run(upTo, coverHash(messages.filter((m) => m.seq <= upTo)), chatId);
+      ok = true;
+    })();
+    return ok;
+  }
+
+  /** The folded messages are as they should be: take their fingerprint again. */
+  summaryChecked(chatId: string): Chat {
+    const chat = this.chat(chatId);
+    const covered = this.messages(chatId).filter((m) => m.seq <= chat.summary.through);
+    this.db.query("UPDATE chats SET summary_hash = ? WHERE id = ?").run(coverHash(covered), chatId);
+    return this.chat(chatId);
+  }
+
+  /** Start the summary over: the note is emptied and every message goes word for word again. */
+  resetSummary(chatId: string): Chat {
+    this.chat(chatId);
+    this.db.transaction(() => {
+      this.db.query("UPDATE chats SET summary_through = 0, summary_hash = '' WHERE id = ?").run(chatId);
+      this.db.query("UPDATE prompt_blocks SET content = '' WHERE id = ?").run(this.summaryNote(chatId).id);
+    })();
+    return this.chat(chatId);
   }
 
   /**
@@ -674,7 +752,7 @@ export class Store {
     const id = newId();
     const at = now();
     this.db.transaction(() => {
-      this.db.query("INSERT INTO chats (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, at, at);
+      this.db.query("INSERT INTO chats (id, name, created_at, updated_at, summary_through, summary_hash, summary_keep, summary_auto) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, name, at, at, from.summary.through, from.summary.hash, from.summary.keep, from.summary.auto ? 1 : 0);
       this.db.query("INSERT INTO chat_cast (chat_id, card_id, position, onstage) SELECT ?, card_id, position, onstage FROM chat_cast WHERE chat_id = ?").run(id, chatId);
       const blocks = this.db.query("SELECT * FROM prompt_blocks WHERE chat_id = ? ORDER BY position").all(chatId) as Row[];
       const insertBlock = this.db.query("INSERT INTO prompt_blocks (id, chat_id, kind, card_id, field_id, title, content, role, enabled, depth, position, nudge) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -692,6 +770,7 @@ export class Store {
       // Copied as they are now; then, if they were saved at that message, as they stood there.
       const story = this.storyAt(messageId);
       if (story) this.restoreStory(id, story);
+      this.dropSummaryPast(id, seq);
     })();
     return this.chat(id);
   }
@@ -713,6 +792,7 @@ export class Store {
     this.db.transaction(() => {
       removed = this.db.query("DELETE FROM messages WHERE chat_id = ? AND seq > ?").run(chatId, seq).changes;
       if (story && removed) this.restoreStory(chatId, story);
+      this.dropSummaryPast(chatId, seq);
       // It's the latest again: its story is the chat's own notes from here on.
       this.db.query("UPDATE messages SET story = NULL WHERE id = ?").run(messageId);
     })();
@@ -722,7 +802,12 @@ export class Store {
 
   deleteMessage(id: string): void {
     const m = this.message(id);
-    this.db.query("DELETE FROM messages WHERE id = ?").run(id);
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM messages WHERE id = ?").run(id);
+      // A summary reaching past the last message would cover the next one written: it reaches to the last one left (and is marked to check).
+      const last = (this.db.query("SELECT COALESCE(MAX(seq), 0) AS n FROM messages WHERE chat_id = ?").get(m.chatId) as { n: number }).n;
+      this.db.query("UPDATE chats SET summary_through = ? WHERE id = ? AND summary_through > ?").run(last, m.chatId, last);
+    })();
     this.touch(m.chatId);
   }
 }
@@ -770,6 +855,7 @@ function toMessage(r: Row): Message {
   return {
     id: r.id as string,
     chatId: r.chat_id as string,
+    seq: r.seq as number,
     role: r.role as "user" | "assistant",
     author: r.author as string,
     content: swipes[swipeIndex] ?? "",

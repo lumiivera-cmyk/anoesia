@@ -28,8 +28,9 @@ function fieldBlocks(c: Card): PromptBlock[] {
   return c.fields.map((f) => block("field", { cardId: c.id, fieldId: f.id, title: f.key === "custom" ? f.title : f.key, content: f.content }));
 }
 
+let seqN = 0;
 function message(role: "user" | "assistant", content: string): Message {
-  return { id: content, chatId: "c", role, author: role === "user" ? "user" : "narrator", content, swipes: [content], swipeIndex: 0, reasoning: "", profileId: "", model: "", createdAt: "", editedAt: null };
+  return { id: content, chatId: "c", seq: ++seqN, role, author: role === "user" ? "user" : "narrator", content, swipes: [content], swipeIndex: 0, reasoning: "", profileId: "", model: "", createdAt: "", editedAt: null, storySaved: false };
 }
 
 const seoul = card("Seoul", [["description", "A city."]], { isCharacter: false });

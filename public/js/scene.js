@@ -17,6 +17,11 @@
  * sheet lets you switch each on or off, rename, reword or remove it, and
  * adds your own or a ready-made one. Notes and nudges are blocks on the
  * prompts page too: same text, two ways in.
+ *
+ * "Story so far" is the note that stands in for older messages
+ * (src/summary.ts). Under it: how far it reaches, how many of the latest
+ * messages go word for word, whether it folds on its own, fold now, and
+ * start over. Folding adds to the end of the note; what you wrote stays.
  */
 
 import { $, api, attempt, cardById, escapeHtml, gem, state } from "./core.js";
@@ -25,6 +30,7 @@ import { confirmDialog, openOverlay, place } from "./overlay.js";
 
 /** What each note is for, shown in it while it's empty. */
 const NOTE_HINTS = {
+  "Story so far": "older scenes, as finished beats · stands in for the messages it covers",
   "Right now": "where the story stands",
   "Who knows what": "one line per secret",
 };
@@ -37,6 +43,10 @@ const PRESETS = [
 
 /** This chat's notes and nudges, as the server last saved them. */
 let blocks = [];
+/** How the story so far stands (GET /api/chats/:id/summary). */
+let summary = null;
+let summaryPoll = 0;
+const SUMMARY = "Story so far";
 /** The button the scene opened from: on a wide screen the menu sits by it, and moves as it grows. */
 let anchor = null;
 
@@ -86,10 +96,108 @@ export async function openScene(opener) {
 }
 
 async function reload() {
-  const all = await attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`));
-  if (!all) return false;
+  const [all, sum] = await Promise.all([attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`)), attempt(() => api("GET", `/api/chats/${state.chatId}/summary`))]);
+  if (!all || !sum) return false;
   blocks = all.filter((b) => b.kind === "note" || isNudge(b));
+  summary = sum;
+  watchFolding();
   return true;
+}
+
+/** While a summary is being written on its own, look again now and then, and show it when it's done. */
+function watchFolding() {
+  clearTimeout(summaryPoll);
+  if (!summary?.folding) return;
+  const chatId = state.chatId;
+  summaryPoll = setTimeout(async () => {
+    if (!menu().open || state.chatId !== chatId) return;
+    const sum = await api("GET", `/api/chats/${chatId}/summary`).catch(() => null);
+    if (!sum || !menu().open || state.chatId !== chatId) return;
+    if (!sum.folding) await takeNote(sum);
+    else summary = sum;
+    watchFolding();
+  }, 3000);
+}
+
+/** A new summary state, with the note's text as the server has it now (folding wrote to it). */
+async function takeNote(sum) {
+  summary = sum;
+  const note = sum.note ?? (await attempt(() => api("GET", `/api/chats/${state.chatId}/blocks`)))?.find((b) => b.kind === "note" && b.title === SUMMARY);
+  if (note) {
+    blocks = blocks.map((b) => (b.id === note.id ? { ...b, content: note.content } : b));
+    const area = menu().querySelector(`[data-text="${CSS.escape(note.id)}:content"]`);
+    if (area) area.value = note.content;
+  }
+  document.dispatchEvent(new CustomEvent("anoesia:summary-changed", { detail: sum }));
+  redraw();
+}
+
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Under the Story so far note: its reach, what's waiting, and its controls. */
+function summaryHtml(n) {
+  if (!summary) return "";
+  const s = summary;
+  let line;
+  if (s.folding) line = "Writing the next part…";
+  else if (s.covered) line = `Covers the first ${plural(s.covered, "message")}${s.sent ? ", which aren't sent word for word" : `, but it's ${n.enabled ? "empty" : "switched off"}, so they're sent word for word`}.`;
+  else line = "Nothing folded in yet: every message is sent word for word.";
+  if (!s.folding && s.waiting) line += ` ${plural(s.waiting, "older message")} could be folded in${s.auto ? `; it folds on its own at ${s.batch}` : ""}.`;
+  const stale = s.stale && !s.folding ? `<p class="sc-sum-warn" role="status">A folded message was edited, deleted or swapped for another version since. Check the summary still fits. <button type="button" class="btn ghost press sc-inline" data-sum="checked">it fits</button></p>` : "";
+  const error = s.error && !s.folding ? `<p class="sc-sum-warn" role="alert">Couldn't fold: ${escapeHtml(s.error)}</p>` : "";
+  return `<div class="sc-sum" aria-live="polite">
+      <p class="meta sc-sum-line">${escapeHtml(line)}</p>${stale}${error}
+      <div class="sc-sum-row">
+        <span class="depth" role="group" aria-label="Messages kept word for word"><span class="meta">latest kept word for word</span>
+          <button type="button" class="step press" data-keep="-10" aria-label="Keep 10 fewer word for word" aria-disabled="${s.keep <= 10}">−</button>
+          <span class="dn">${s.keep}</span>
+          <button type="button" class="step press" data-keep="10" aria-label="Keep 10 more word for word" aria-disabled="${s.keep >= 990}">+</button></span>
+        <span class="sc-sum-auto"><span class="meta">on its own</span><button type="button" role="switch" class="switch" aria-checked="${s.auto}" aria-label="Fold on its own" data-sum-auto><span class="knob"></span></button></span>
+      </div>
+      <div class="sc-add sc-sum-acts">
+        <button type="button" class="raised press btn" data-sum="fold" ${s.folding || !s.waiting ? 'aria-disabled="true"' : ""}>${icon.text(16)}fold now</button>
+        ${s.covered || n.content.trim() ? `<button type="button" class="ghost press btn" data-sum="reset" ${s.folding ? 'aria-disabled="true"' : ""}>start over</button>` : ""}
+      </div>
+    </div>`;
+}
+
+async function onSummary(e) {
+  const keep = e.target.closest("[data-keep]");
+  if (keep) {
+    if (keep.getAttribute("aria-disabled") === "true") return;
+    const next = Math.min(990, Math.max(10, Math.round((summary.keep + Number(keep.dataset.keep)) / 10) * 10));
+    const done = await attempt(() => api("PATCH", `/api/chats/${state.chatId}`, { summaryKeep: next }));
+    if (done) await refreshSummary(`[data-keep="${keep.dataset.keep}"]`);
+    return true;
+  }
+  if (e.target.closest("[data-sum-auto]")) {
+    const done = await attempt(() => api("PATCH", `/api/chats/${state.chatId}`, { summaryAuto: !summary.auto }));
+    if (done) await refreshSummary("[data-sum-auto]");
+    return true;
+  }
+  const act = e.target.closest("[data-sum]");
+  if (!act) return false;
+  if (act.getAttribute("aria-disabled") === "true") return true;
+  const what = act.dataset.sum;
+  if (what === "reset" && !(await confirmDialog({ title: "Start the story so far over?", body: ["The note is emptied, and every message is sent word for word again until it's folded anew."], confirm: "start over", opener: act }))) return true;
+  await flushAll();
+  if (what === "fold") {
+    summary = { ...summary, folding: true, error: "" };
+    redraw();
+  }
+  const done = await attempt(() => api("POST", `/api/chats/${state.chatId}/summary/${what}`));
+  if (done) await takeNote(done);
+  else await refreshSummary();
+  menu().querySelector(what === "reset" ? "[data-sum=fold]" : `[data-sum="${what}"]`)?.focus();
+  return true;
+}
+
+async function refreshSummary(focus) {
+  const sum = await attempt(() => api("GET", `/api/chats/${state.chatId}/summary`));
+  if (sum) summary = sum;
+  document.dispatchEvent(new CustomEvent("anoesia:summary-changed", { detail: summary }));
+  watchFolding();
+  redraw(focus);
 }
 
 /** Size every text to what's in it, then put the menu back by its button (its height changed). */
@@ -115,7 +223,7 @@ function render() {
     .map((n) => {
       const hint = NOTE_HINTS[n.title] ?? "this chat only";
       return `<li class="sc-note"><span class="sc-note-head"><label class="sc-n" for="sc-${n.id}">${escapeHtml(n.title)}${n.enabled ? "" : ' <span class="chip-you">· switched off</span>'}</label>${saved(n.id)}</span>
-        <textarea class="sunk" id="sc-${n.id}" data-text="${n.id}:content" rows="2" placeholder="${escapeHtml(hint)} · empty isn't sent">${escapeHtml(value(n, "content"))}</textarea></li>`;
+        <textarea class="sunk" id="sc-${n.id}" data-text="${n.id}:content" rows="2" placeholder="${escapeHtml(hint)} · empty isn't sent">${escapeHtml(value(n, "content"))}</textarea>${n.title === SUMMARY ? summaryHtml(n) : ""}</li>`;
     })
     .join("");
   const nudgeRows = nudges()
@@ -161,6 +269,7 @@ function redraw(selector) {
 }
 
 async function onClick(e) {
+  if (await onSummary(e)) return;
   const sw = e.target.closest("[data-stage]");
   if (sw) {
     const id = sw.dataset.stage;

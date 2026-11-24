@@ -14,7 +14,8 @@ import { ApiError, CancelledError, createChatCompletion, listModels, streamChatC
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { NUDGES } from "./nudges.ts";
-import { prepareTurn } from "./agent.ts";
+import { FOLD_BATCH, foldMessages, foldStatus, nextFold } from "./summary.ts";
+import { branch, editText, prepareTurn, rewind, rewindCount, setAsideLastAnswer, switchVersion } from "./agent.ts";
 import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
 import { ConflictError, Workspace } from "./workspace.ts";
@@ -95,6 +96,7 @@ export function createApp(config: Config): App {
         const reply = await generate(chatId, live, history);
         if (last) store.addSwipe(last.id, reply.content, reply.profileId, reply.model, reply.reasoning);
         else store.addMessage({ chatId, role: "assistant", author: "narrator", ...reply });
+        foldSoon(chatId);
       } catch (error) {
         if (!(error instanceof ApiError || error instanceof ValidationError || error instanceof CancelledError)) console.error(error);
         outcome = { error: errorMessage(error) };
@@ -114,11 +116,11 @@ export function createApp(config: Config): App {
    * "reply"), each message once it's saved ("saved", with the session), and
    * "done" at the end. Stop keeps what was done so far.
    */
-  function startTurn(sessionId: string, text: string, chatId: string | null): Live {
+  function startTurn(sessionId: string, input: { text: string; chatId: string | null; again?: boolean; setup?: () => void }): Live {
     agent.session(sessionId);
     if (agentRunning.has(sessionId)) throw new ValidationError("The agent is still working on your last message.");
     const live: Live = { controller: new AbortController(), reply: { reasoning: "", content: "" }, watchers: new Set(), finished: Promise.resolve({}) };
-    const turn = prepareTurn({ store, agent, ws, api }, { sessionId, text, chatId, signal: live.controller.signal });
+    const turn = prepareTurn({ store, agent, ws, api }, { sessionId, ...input, signal: live.controller.signal });
     agentRunning.set(sessionId, live);
     live.finished = (async () => {
       let outcome: { error?: string } = {};
@@ -293,12 +295,93 @@ export function createApp(config: Config): App {
   function buildPrompt(chatId: string, history?: Message[]) {
     const blocks = store.blocks(chatId);
     const cards = new Map(store.cards().map((c) => [c.id, c]));
-    return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), vars: store.vars(chatId), globals: store.vars("global") });
+    const summaryThrough = store.chat(chatId).summary.through;
+    return assemblePrompt({ blocks, cards, messages: history ?? store.messages(chatId), summaryThrough, vars: store.vars(chatId), globals: store.vars("global") });
+  }
+
+  // ------------------------------------------------------- the story so far
+
+  /** The summary being written in each chat (one at a time), and the last one's error. */
+  const folding = new Map<string, Promise<void>>();
+  const foldErrors = new Map<string, string>();
+
+  /**
+   * Fold a chat's older messages into its "Story so far" note
+   * (src/summary.ts): everything past the messages kept word for word, a
+   * chunk per request, each part saved as it arrives. Written by the RP
+   * profile. A part whose messages changed meanwhile (rewound, edited) is
+   * dropped, and folding stops there. Errors are kept for the scene menu.
+   */
+  function fold(chatId: string): Promise<void> {
+    const already = folding.get(chatId);
+    if (already) return already;
+    const job = (async () => {
+      foldErrors.delete(chatId);
+      try {
+        for (let round = 0; round < 50; round++) {
+          const chat = store.chat(chatId);
+          const batch = nextFold(chat, store.messages(chatId));
+          if (!batch.length) return;
+          const settings = store.settings();
+          if (!settings.rpProfileId) throw new ValidationError("Pick a connection profile first (Settings → Connections).");
+          const profile = store.profile(settings.rpProfileId);
+          if (!profile.model) throw new ValidationError(`The profile "${profile.name}" has no model yet.`);
+          const cards = chat.cast.map((id) => store.card(id));
+          const persona = cards.find((c) => c.isPersona);
+          const result = await createChatCompletion(api, {
+            model: profile.model,
+            provider: profile.provider,
+            messages: foldMessages({ summary: store.summaryNote(chatId).content, batch, userName: persona?.name ?? "User", cast: cards.filter((c) => !c.isPersona && c.isCharacter).map((c) => c.name) }),
+            // A summary wants to be faithful more than surprising.
+            temperature: Math.min(profile.temperature, 0.7),
+            maxTokens: Math.max(profile.maxTokens, 2000),
+            topP: profile.topP,
+            minP: profile.minP,
+            reasoningEffort: profile.reasoningEffort,
+            extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Json) : undefined,
+          });
+          const part = cleanReply(result.content);
+          if (!part) throw new ApiError("The model returned an empty summary.");
+          if (!store.foldIn(chatId, chat.summary.through, batch, part)) return;
+        }
+      } catch (error) {
+        if (!(error instanceof ApiError || error instanceof ValidationError || error instanceof NotFoundError)) console.error(error);
+        foldErrors.set(chatId, errorMessage(error));
+      } finally {
+        folding.delete(chatId);
+      }
+    })();
+    folding.set(chatId, job);
+    return job;
+  }
+
+  /** After a reply: fold on its own, when the chat does and enough messages are waiting. */
+  function foldSoon(chatId: string): void {
+    const chat = store.chat(chatId);
+    if (!chat.summary.auto || folding.has(chatId)) return;
+    if (foldStatus(chat, store.messages(chatId)).waiting >= FOLD_BATCH) void fold(chatId);
+  }
+
+  /** How the summary stands, for the scene menu and the chat. */
+  function summaryView(chatId: string) {
+    const note = store.summaryNote(chatId);
+    return { ...foldStatus(store.chat(chatId), store.messages(chatId)), batch: FOLD_BATCH, noteId: note.id, sent: note.enabled && Boolean(note.content.trim()), folding: folding.has(chatId), error: foldErrors.get(chatId) ?? "" };
   }
 
   function editView(e: AgentEdit) {
     const path = e.target.startsWith("file:") ? ws.displayFilePath(e.target.slice(5)) : e.path;
     return { ...e, path, diff: compactDiff(diff(e.before ?? "", e.after ?? "")) };
+  }
+
+  /** A turn's answer: streamed with ?stream=1 (see `watch`), else once it's done. */
+  async function turnAnswer(id: string, live: Live, url: URL): Promise<Response> {
+    if (url.searchParams.get("stream") === "1") return watch(() => sessionView(id), live);
+    const outcome = await live.finished;
+    return json({ ...sessionView(id), ...outcome });
+  }
+
+  function notBusy(sessionId: string): void {
+    if (agentRunning.has(sessionId)) throw new ValidationError("The agent is still working. Stop it first.");
   }
 
   function sessionView(id: string) {
@@ -310,7 +393,7 @@ export function createApp(config: Config): App {
   }
 
   function chatView(chatId: string) {
-    return { chat: store.chat(chatId), messages: store.messages(chatId), busy: running.has(chatId) };
+    return { chat: store.chat(chatId), messages: store.messages(chatId), busy: running.has(chatId), summary: summaryView(chatId) };
   }
 
   /** A reply's answer to a plain (not streamed) request: the chat once the reply is saved, or with the error. */
@@ -478,6 +561,21 @@ export function createApp(config: Config): App {
       const outcome = store.rewindChat(chatId, b.messageId);
       return json({ ...chatView(chatId), ...outcome });
     }
+    // The story so far: how it stands, fold now, the folded messages are fine as they are, start over.
+    if ((p = m("/api/chats/:id/summary")) && method === "GET") return json(summaryView(p[0]!));
+    if ((p = m("/api/chats/:id/summary/fold")) && method === "POST") {
+      await fold(p[0]!);
+      return json({ ...summaryView(p[0]!), note: store.summaryNote(p[0]!) });
+    }
+    if ((p = m("/api/chats/:id/summary/checked")) && method === "POST") {
+      store.summaryChecked(p[0]!);
+      return json({ ...summaryView(p[0]!), note: store.summaryNote(p[0]!) });
+    }
+    if ((p = m("/api/chats/:id/summary/reset")) && method === "POST") {
+      if (folding.has(p[0]!)) throw new ValidationError("The summary is being written. Wait for it to finish, then start over.");
+      store.resetSummary(p[0]!);
+      return json({ ...summaryView(p[0]!), note: store.summaryNote(p[0]!) });
+    }
     if ((p = m("/api/chats/:id/stop")) && method === "POST") {
       running.get(p[0]!)?.controller.abort();
       return json({ ok: true });
@@ -496,10 +594,64 @@ export function createApp(config: Config): App {
     if ((p = m("/api/agent/sessions/:id/send")) && method === "POST") {
       const id = p[0]!;
       const b = await body();
-      const live = startTurn(id, typeof b.content === "string" ? b.content : "", typeof b.chatId === "string" ? b.chatId : null);
-      if (url.searchParams.get("stream") === "1") return watch(() => sessionView(id), live);
-      const outcome = await live.finished;
-      return json({ ...sessionView(id), ...outcome });
+      const live = startTurn(id, { text: typeof b.content === "string" ? b.content : "", chatId: typeof b.chatId === "string" ? b.chatId : null });
+      return turnAnswer(id, live, url);
+    }
+    // Reroll: the last answer's changes are taken back and set aside, and it's written again.
+    if ((p = m("/api/agent/sessions/:id/reroll")) && method === "POST") {
+      const id = p[0]!;
+      const b = await body();
+      const live = startTurn(id, { text: "", chatId: typeof b.chatId === "string" ? b.chatId : null, again: true, setup: () => setAsideLastAnswer({ agent, ws }, id, b.force === true) });
+      return turnAnswer(id, live, url);
+    }
+    // Show another version of the last answer, with its changes back in place.
+    if ((p = m("/api/agent/sessions/:id/version")) && method === "POST") {
+      const id = p[0]!;
+      const b = await body();
+      notBusy(id);
+      switchVersion({ agent, ws }, id, Number(b.index), b.force === true);
+      return json(sessionView(id));
+    }
+    if ((p = m("/api/agent/messages/:id"))) {
+      const message = agent.message(p[0]!);
+      if (method === "PATCH") {
+        notBusy(message.sessionId);
+        editText({ agent, ws }, message.id, (await body()).content);
+        return json(sessionView(message.sessionId));
+      }
+    }
+    // Rewind: everything after a message goes, and what the agent did after it is undone.
+    if ((p = m("/api/agent/messages/:id/rewind"))) {
+      const message = agent.message(p[0]!);
+      if (method === "GET") return json({ changes: rewindCount({ agent, ws }, message.id) });
+      if (method === "POST") {
+        notBusy(message.sessionId);
+        rewind({ agent, ws }, message.id, (await body()).force === true);
+        return json(sessionView(message.sessionId));
+      }
+    }
+    // Your message, edited and answered again: everything after it is rewound first.
+    if ((p = m("/api/agent/messages/:id/resend")) && method === "POST") {
+      const message = agent.message(p[0]!);
+      if (message.role !== "user") throw new ValidationError("Only your own messages can be sent again.");
+      const b = await body();
+      const content = typeof b.content === "string" ? b.content : message.content;
+      const live = startTurn(message.sessionId, {
+        text: "",
+        chatId: typeof b.chatId === "string" ? b.chatId : null,
+        again: true,
+        setup: () =>
+          agent.db.transaction(() => {
+            rewind({ agent, ws }, message.id, b.force === true);
+            editText({ agent, ws }, message.id, content);
+          })(),
+      });
+      return turnAnswer(message.sessionId, live, url);
+    }
+    // Branch: a new session with the conversation up to a message.
+    if ((p = m("/api/agent/messages/:id/branch")) && method === "POST") {
+      const copy = branch({ agent, ws }, p[0]!);
+      return json(sessionView(copy.id));
     }
     // Watch the turn being run (after the page was reloaded, or the phone slept).
     if ((p = m("/api/agent/sessions/:id/live")) && method === "GET") {

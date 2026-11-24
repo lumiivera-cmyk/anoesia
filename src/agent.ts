@@ -60,8 +60,9 @@ export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, cha
 
 - cards/<card>/<field>: a card's fields (Description, Advanced description, System prompt, and custom fields)
 - prompt/main: the main prompt, shared by every chat
-- chats/<chat>/messages/<n>: a chat's messages, 1 is the first; the version shown
+- chats/<chat>/messages/<n>: a chat's messages, 1 is the first; the version shown. list one to see its versions: chats/<chat>/messages/<n>/versions/<k> (each can be read and edited, to stitch lines from one into another), and chats/<chat>/messages/<n>/reasoning (the narrator's reasoning or plan behind the version shown, read only; versions/<k>/reasoning for another version). Read the reasoning when a reply went wrong, to see why.
 - chats/<chat>/blocks/<block>: the blocks on a chat's prompts page, in order. Two are the chat's notes, sent to the roleplay model when they have text: "Right now" (where the story stands) and "Who knows what" (one line per secret). Story state goes there, never in a card: cards describe who someone is.
+- chats/<chat>/layout: every block in the order sent, one "Name | on | system" line each ("| depth N" places it inside the chat history, N messages from the end), and "(chat history)" where the history goes. Edit it to switch blocks on or off, move them, or change their role or depth: list every block once. Add or delete blocks under blocks/.
 - chats/<chat>/cast: who's onstage, one "Name: onstage" or "Name: offstage" line per cast member. Offstage, only the card's Description is sent and {{cast}} leaves them out. Edit a line to move someone on or off stage.
 - agent/index.md (your notes, below), agent/personality.md, agent/notes/, agent/chats/<chat>/ (a folder for each chat)`,
     index ? `## Your notes (agent/index.md)\n\n${index}` : "",
@@ -82,6 +83,7 @@ Today: ${new Date().toISOString().slice(0, 10)}`,
 export function toApiMessages(messages: AgentMessage[], currentTurnId: string): AgentApiMessage[] {
   const out: AgentApiMessage[] = [];
   for (const m of messages) {
+    if (m.hidden) continue;
     if (m.role === "user") out.push({ role: "user", content: m.content });
     else if (m.role === "assistant") out.push(m.toolCalls?.length ? { role: "assistant", content: m.content || null, tool_calls: m.toolCalls } : { role: "assistant", content: m.content });
     else {
@@ -94,9 +96,14 @@ export function toApiMessages(messages: AgentMessage[], currentTurnId: string): 
 
 export interface TurnInput {
   sessionId: string;
+  /** Your message. Left out with `again`. */
   text: string;
   chatId: string | null;
   signal?: AbortSignal;
+  /** Answer your last message again (a reroll, or your message edited): no new message is saved. */
+  again?: boolean;
+  /** Runs once the turn is known to be able to start, before it does (taking back the old answer). */
+  setup?: () => void;
 }
 
 /** What a turn tells its watchers as it goes. */
@@ -126,15 +133,20 @@ export function prepareTurn(deps: { store: Store; agent: AgentStore; ws: Workspa
   const profile = store.profile(settings.agentProfileId);
   if (!profile.model) throw new ValidationError(`The profile "${profile.name}" has no model yet.`);
   const text = input.text.trim();
-  if (!text) throw new ValidationError("Write something to the agent first.");
+  if (!text && !input.again) throw new ValidationError("Write something to the agent first.");
 
   const session = agent.updateSession(input.sessionId, { chatId: input.chatId });
   if (session.scope === "chat" && !session.chatId) throw new ValidationError("This session's chat was deleted. Start a session with the main agent instead.");
+  input.setup?.();
   const turnId = newId();
   const added: AgentMessage[] = [];
   const edits: AgentEdit[] = [];
-  added.push(agent.addMessage({ sessionId: session.id, turnId, role: "user", content: text }));
-  if (session.title === "New session") agent.updateSession(session.id, { title: text.replace(/\s+/g, " ").slice(0, 60) });
+  if (input.again) {
+    if (agent.messages(session.id).filter((m) => !m.hidden).at(-1)?.role !== "user") throw new ValidationError("There's no message of yours at the end to answer again.");
+  } else {
+    added.push(agent.addMessage({ sessionId: session.id, turnId, role: "user", content: text }));
+    if (session.title === "New session") agent.updateSession(session.id, { title: text.replace(/\s+/g, " ").slice(0, 60) });
+  }
 
   const run = async (hooks: TurnHooks = {}): Promise<TurnResult> => {
     const save = (m: Parameters<AgentStore["addMessage"]>[0]) => {
@@ -217,4 +229,134 @@ export function prepareTurn(deps: { store: Store; agent: AgentStore; ws: Workspa
  */
 export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Workspace; api: ApiOptions }, input: TurnInput, hooks?: TurnHooks): Promise<TurnResult> {
   return prepareTurn(deps, input).run(hooks);
+}
+
+// ------------------------------------------------- versions, rewind, branch
+
+/** One answer to a message of yours: the agent's messages from one run, and whether it's an earlier version. */
+export interface Run {
+  turnId: string;
+  messages: AgentMessage[];
+  hidden: boolean;
+}
+
+/** Your message and its answers: the one shown, and earlier versions (rerolled). */
+export interface Exchange {
+  user: AgentMessage | null;
+  runs: Run[];
+}
+
+/** A session's messages as exchanges, in order. */
+export function exchanges(messages: AgentMessage[]): Exchange[] {
+  const out: Exchange[] = [];
+  for (const m of messages) {
+    if (m.role === "user" || !out.length) out.push({ user: m.role === "user" ? m : null, runs: [] });
+    if (m.role === "user") continue;
+    const ex = out.at(-1)!;
+    let run = ex.runs.find((r) => r.turnId === m.turnId);
+    if (!run) ex.runs.push((run = { turnId: m.turnId, messages: [], hidden: m.hidden }));
+    run.messages.push(m);
+  }
+  return out;
+}
+
+type Deps = { agent: AgentStore; ws: Workspace };
+
+const shownRun = (ex: Exchange) => ex.runs.find((r) => !r.hidden);
+
+/** Every change these answers made. */
+function editsOf(agent: AgentStore, runs: Run[]): AgentEdit[] {
+  return runs.flatMap((r) => agent.edits({ turnId: r.turnId, limit: 1000 }));
+}
+
+/**
+ * Take back the last answer before it's written again: its changes are
+ * reverted (and set aside, to put back if you switch to it again) and its
+ * messages kept as an earlier version. Throws `ConflictError` (nothing
+ * changed) when something it changed was changed again since, unless `force`.
+ */
+export function setAsideLastAnswer({ agent, ws }: Deps, sessionId: string, force: boolean): void {
+  const last = exchanges(agent.messages(sessionId)).at(-1);
+  if (!last?.user) throw new ValidationError("There's no message of yours to answer again.");
+  const run = shownRun(last);
+  if (!run) return;
+  agent.db.transaction(() => {
+    ws.revertEdits(editsOf(agent, [run]), force, true);
+    agent.setHidden(run.messages.map((m) => m.id), true);
+  })();
+}
+
+/**
+ * Show another version of the last answer (0 is the first): the shown one's
+ * changes are set aside and the other's put back. All or nothing: a
+ * conflict changes nothing, unless `force`.
+ */
+export function switchVersion({ agent, ws }: Deps, sessionId: string, index: number, force: boolean): void {
+  const last = exchanges(agent.messages(sessionId)).at(-1);
+  const target = last?.runs[index];
+  if (!last || !target) throw new ValidationError("There's no such version.");
+  const current = shownRun(last);
+  if (current === target) return;
+  agent.db.transaction(() => {
+    if (current) {
+      ws.revertEdits(editsOf(agent, [current]), force, true);
+      agent.setHidden(current.messages.map((m) => m.id), true);
+    }
+    ws.reapplyEdits(editsOf(agent, [target]).filter((e) => e.setAside), force);
+    agent.setHidden(target.messages.map((m) => m.id), false);
+  })();
+}
+
+/**
+ * Where a rewind or branch cuts: at your message, its answers go too; at
+ * one of the agent's, its whole answer (and its other versions) stays.
+ * Returns the messages kept and the exchanges cut.
+ */
+function cut(agent: AgentStore, messageId: string): { session: AgentSession; kept: AgentMessage[]; cut: Exchange[]; message: AgentMessage } {
+  const message = agent.message(messageId);
+  const session = agent.session(message.sessionId);
+  const all = exchanges(agent.messages(session.id));
+  const at = all.findIndex((ex) => ex.user?.id === messageId || ex.runs.some((r) => r.messages.some((m) => m.id === messageId)));
+  if (at < 0) throw new ValidationError("That message isn't in this session.");
+  const ex = all[at]!;
+  if (message.role === "user") {
+    return { session, message, kept: all.slice(0, at).flatMap(flat).concat(ex.user!), cut: [{ user: null, runs: ex.runs }, ...all.slice(at + 1)] };
+  }
+  return { session, message, kept: all.slice(0, at + 1).flatMap(flat), cut: all.slice(at + 1) };
+}
+
+const flat = (ex: Exchange): AgentMessage[] => [...(ex.user ? [ex.user] : []), ...ex.runs.flatMap((r) => r.messages)];
+
+/** How many changes a rewind to this message would take back. */
+export function rewindCount({ agent }: Deps, messageId: string): number {
+  const { cut: gone } = cut(agent, messageId);
+  return editsOf(agent, gone.flatMap((ex) => ex.runs)).filter((e) => !e.revertedAt).length;
+}
+
+/**
+ * Go back to a message: everything after it goes, and what the agent did
+ * after it is reverted. A conflict changes nothing, unless `force`.
+ */
+export function rewind({ agent, ws }: Deps, messageId: string, force: boolean): void {
+  const { cut: gone } = cut(agent, messageId);
+  agent.db.transaction(() => {
+    ws.revertEdits(editsOf(agent, gone.flatMap((ex) => ex.runs)), force);
+    agent.deleteMessages(gone.flatMap(flat).map((m) => m.id));
+  })();
+}
+
+/** A new session with this one's conversation up to a message (the versions shown). The changes stay with the original. */
+export function branch({ agent }: Deps, messageId: string): AgentSession {
+  const { session, kept } = cut(agent, messageId);
+  const copy = agent.createSession({ title: `${session.title} (branch)`, scope: session.scope, chatId: session.chatId });
+  agent.copyMessages(copy.id, kept.filter((m) => !m.hidden));
+  return agent.session(copy.id);
+}
+
+/** Change the words of your message or the agent's reply (not a tool call). */
+export function editText({ agent }: Deps, messageId: string, raw: unknown): AgentMessage {
+  const m = agent.message(messageId);
+  if (typeof raw !== "string" || !raw.trim()) throw new ValidationError("A message can't be empty.");
+  if (m.role === "tool" || m.toolCalls?.length) throw new ValidationError("Only your messages and the agent's replies can be edited.");
+  return agent.setMessageText(m.id, raw.trim());
 }

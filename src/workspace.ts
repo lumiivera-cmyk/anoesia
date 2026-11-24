@@ -53,6 +53,8 @@ interface Target {
   remove?: () => Record<string, unknown> | null;
   /** Why it can't be created or deleted, when it can't. */
   readOnly?: string;
+  /** Why it can only be read (a reply's reasoning), when it can't be changed at all. */
+  fixed?: string;
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -107,6 +109,90 @@ export class Workspace {
         seen.set(norm(name), n);
         return { block, name: n > 1 ? `${name} (${n})` : name };
       });
+  }
+
+  /** A message by its number (1 is the first) or id. */
+  private findMessage(chatName: string, which: string) {
+    const chat = this.findChat(chatName);
+    const messages = this.store.messages(chat.id);
+    const n = Number(which);
+    const message = Number.isInteger(n) && n >= 1 ? messages[n - 1] : messages.find((m) => m.id === which);
+    if (!message) throw new ValidationError(`${chat.name} has ${messages.length} messages, numbered 1 to ${messages.length}. There's no message ${which}.`);
+    return { chat, message, number: messages.indexOf(message) + 1 };
+  }
+
+  /** A message's reasoning for each of its versions ("" where there was none). */
+  private reasonings(messageId: string): string[] {
+    const row = this.store.db.query("SELECT reasonings FROM messages WHERE id = ?").get(messageId) as { reasonings: string | null } | null;
+    try {
+      const list = JSON.parse(row?.reasonings ?? "[]") as unknown;
+      return Array.isArray(list) ? list.map((r) => (typeof r === "string" ? r : "")) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * A chat's prompt layout as text: one line per block, in the order sent,
+   * "Name | on | system", with "| depth N" for a block placed inside the
+   * chat history, and "(chat history)" where the history goes.
+   */
+  layoutText(chatId: string): string {
+    const named = new Map(this.blockNames(chatId).map((x) => [x.block.id, x.name]));
+    return this.store
+      .blocks(chatId)
+      .map((b, i) => `${i + 1}. ${b.kind === "history" ? "(chat history)" : [named.get(b.id), b.enabled ? "on" : "off", b.role, ...(b.depth === null ? [] : [`depth ${b.depth}`])].join(" | ")}`)
+      .join("\n");
+  }
+
+  /** Apply a layout written like `layoutText`: every block once, in the new order, each with its switch, role and depth. */
+  private setLayoutText(chatId: string, text: string): void {
+    const chat = this.store.chat(chatId);
+    const blocks = this.store.blocks(chatId);
+    const named = this.blockNames(chatId);
+    const order: string[] = [];
+    const changes = new Map<string, { enabled: boolean; role: string; depth: number | null }>();
+    for (const raw of text.split("\n")) {
+      const line = raw.trim().replace(/^\d+\.\s*/, "");
+      if (!line) continue;
+      if (/^\(chat history\)$/i.test(line)) {
+        const history = blocks.find((b) => b.kind === "history");
+        if (history) order.push(history.id);
+        continue;
+      }
+      const parts = line.split("|").map((p) => p.trim());
+      const [name, state, role, depthPart, ...extra] = parts;
+      const hit = named.find((x) => norm(x.name) === norm(name ?? ""));
+      if (!hit) throw new ValidationError(`"${name}" isn't a block in ${chat.name}. Its blocks are: ${named.map((x) => x.name).join(", ")}. Add new ones under blocks/.`);
+      if (!state || !/^(on|off)$/i.test(state) || !role || extra.length) throw new ValidationError(`"${line}" should read "Name | on | system", with "| depth N" after the role to place it inside the chat history.`);
+      if (!/^(system|user|assistant)$/i.test(role)) throw new ValidationError(`"${role}" isn't a role. Use system, user or assistant.`);
+      let depth: number | null = null;
+      if (depthPart) {
+        const m = /^depth\s+(\d+)$/i.exec(depthPart);
+        if (!m) throw new ValidationError(`"${depthPart}" should read "depth N": how many messages from the end, 0 is after the last.`);
+        depth = Number(m[1]);
+      }
+      if (order.includes(hit.block.id)) throw new ValidationError(`${hit.name} is listed twice.`);
+      order.push(hit.block.id);
+      changes.set(hit.block.id, { enabled: /^on$/i.test(state), role: role.toLowerCase(), depth });
+    }
+    const missing = blocks.filter((b) => !order.includes(b.id));
+    if (missing.length) {
+      const names = new Map(named.map((x) => [x.block.id, x.name]));
+      throw new ValidationError(`The layout has to list every block once. Missing: ${missing.map((b) => names.get(b.id) ?? "(chat history)").join(", ")}. Delete a block under blocks/ instead of leaving it out.`);
+    }
+    this.store.db.transaction(() => {
+      for (const b of blocks) {
+        const want = changes.get(b.id);
+        if (!want) continue;
+        const patch: Record<string, unknown> = {};
+        if (want.enabled !== b.enabled) patch.enabled = want.enabled;
+        if (want.role !== b.role) patch.role = want.role;
+        if (want.depth !== b.depth) patch.depth = want.depth;
+        if (Object.keys(patch).length) this.store.updateBlock(b.id, patch);
+      }
+      this.store.orderBlocks(chatId, order);
+    })();
   }
 
   /** A chat's cast as text: one "Name: onstage" or "Name: offstage" line per member, in cast order. */
@@ -181,18 +267,37 @@ export class Workspace {
         },
       };
     }
-    if (root === "chats" && a && b === "messages" && c && rest.length === 0) {
+    if (root === "chats" && a && b === "messages" && c) {
+      const { chat, message, number } = this.findMessage(a, c);
+      const base = `chats/${chat.name}/messages/${number}`;
+      const noReasoning = (where: string) => `${where} has no saved reasoning: it was written by a model that didn't think, or before reasoning was kept, or it's the person's own message.`;
+      const fixed = "A reply's reasoning is kept to read, never changed.";
+      if (rest.length === 0) {
+        return { path: base, key: `message:${message.id}:${message.swipeIndex}`, value: message.content, readOnly: "Messages can be edited, not created or deleted, here." };
+      }
+      if (rest.length === 1 && rest[0] === "reasoning") {
+        if (!message.reasoning.trim()) throw new ValidationError(noReasoning(base));
+        return { path: `${base}/reasoning`, key: "", value: message.reasoning, readOnly: fixed, fixed };
+      }
+      if (rest[0] === "versions" && rest[1] && rest.length <= 3) {
+        const k = Number(rest[1]);
+        if (!Number.isInteger(k) || k < 1 || k > message.swipes.length) throw new ValidationError(`${base} has ${message.swipes.length} version${message.swipes.length === 1 ? "" : "s"}, numbered 1 to ${message.swipes.length}. There's no version ${rest[1]}.`);
+        const path = `${base}/versions/${k}`;
+        if (rest.length === 2) return { path, key: `message:${message.id}:${k - 1}`, value: message.swipes[k - 1]!, readOnly: "Versions can be edited, not created or deleted, here. Regenerating makes a new one." };
+        if (rest[2] === "reasoning") {
+          const reasoning = this.reasonings(message.id)[k - 1] ?? "";
+          if (!reasoning.trim()) throw new ValidationError(noReasoning(path));
+          return { path: `${path}/reasoning`, key: "", value: reasoning, readOnly: fixed, fixed };
+        }
+      }
+    }
+    if (root === "chats" && a && b === "layout" && !c) {
       const chat = this.findChat(a);
-      const messages = this.store.messages(chat.id);
-      const n = Number(c);
-      const message = Number.isInteger(n) && n >= 1 ? messages[n - 1] : messages.find((m) => m.id === c);
-      if (!message) throw new ValidationError(`${chat.name} has ${messages.length} messages, numbered 1 to ${messages.length}. There's no message ${c}.`);
-      const number = messages.indexOf(message) + 1;
       return {
-        path: `chats/${chat.name}/messages/${number}`,
-        key: `message:${message.id}:${message.swipeIndex}`,
-        value: message.content,
-        readOnly: "Messages can be edited, not created or deleted, here.",
+        path: `chats/${chat.name}/layout`,
+        key: `layout:${chat.id}`,
+        value: this.layoutText(chat.id),
+        readOnly: "Every chat has its layout. Add or delete a block under blocks/; here you switch blocks on or off, move them, and set their role and depth.",
       };
     }
     if (root === "chats" && a && b === "cast" && !c) {
@@ -279,17 +384,33 @@ export class Workspace {
         const names = (ids: string[]) => ids.map((id) => cards.get(id) ?? id).join(", ") || "nobody";
         return [
           { path: `chats/${chat.name}/messages/`, note: `${count} messages` },
-          { path: `chats/${chat.name}/blocks/`, note: "its prompt, block by block, with its notes (Right now, Who knows what)" },
+          { path: `chats/${chat.name}/blocks/`, note: "its prompt, block by block, with its notes (Story so far, Right now, Who knows what)" },
+          { path: `chats/${chat.name}/layout`, note: "every block in the order sent: on or off, role, depth. Edit it to switch, move or place them" },
           { path: `chats/${chat.name}/cast`, note: `onstage: ${names(chat.cast.filter((id) => !chat.offstage.includes(id)))}; offstage: ${names(chat.offstage)}` },
           { path: `agent/chats/${chat.name}/`, note: "your folder for this chat" },
         ];
       }
       if (parts.length === 3 && b === "messages") {
         const cards = new Map(this.store.cards().map((c) => [c.id, c.name]));
-        return this.store.messages(chat.id).map((m, i) => ({
-          path: `chats/${chat.name}/messages/${i + 1}`,
-          note: `${m.author === "user" || m.author === "narrator" ? m.author : (cards.get(m.author) ?? m.author)}: ${preview(m.content)}`,
+        return this.store.messages(chat.id).map((m, i) => {
+          const extras = [m.swipes.length > 1 ? `${m.swipes.length} versions, ${m.swipeIndex + 1} shown` : "", m.reasoning.trim() ? "has reasoning" : ""].filter(Boolean).join(", ");
+          return {
+            path: `chats/${chat.name}/messages/${i + 1}`,
+            note: `${m.author === "user" || m.author === "narrator" ? m.author : (cards.get(m.author) ?? m.author)}${extras ? ` (${extras})` : ""}: ${preview(m.content)}`,
+          };
+        });
+      }
+      // One message: its versions and its reasoning.
+      if (b === "messages" && parts[3] && (parts.length === 4 || (parts.length === 5 && parts[4] === "versions"))) {
+        const { message, number } = this.findMessage(chat.id, parts[3]);
+        const base = `chats/${chat.name}/messages/${number}`;
+        const reasonings = this.reasonings(message.id);
+        const entries: Entry[] = message.swipes.map((text, k) => ({
+          path: `${base}/versions/${k + 1}`,
+          note: `${k === message.swipeIndex ? "shown, " : ""}${reasonings[k]?.trim() ? `reasoning at ${base}/versions/${k + 1}/reasoning, ` : ""}${preview(text)}`,
         }));
+        if (parts.length === 4 && message.reasoning.trim()) entries.unshift({ path: `${base}/reasoning`, note: "the reasoning behind the version shown (read only)" });
+        return entries;
       }
       if (parts.length === 3 && b === "blocks") {
         const cards = new Map(this.store.cards().map((c) => [c.id, c]));
@@ -368,6 +489,7 @@ export class Workspace {
   write(path: string, text: string, ctx: EditContext): AgentEdit {
     if (typeof text !== "string") throw new ValidationError("The text must be text.");
     const target = this.target(path);
+    if (target.fixed) throw new ValidationError(target.fixed);
     if (target.value === text) throw new ValidationError(`${target.path} already says exactly that. Nothing changed.`);
     if (target.value === null) {
       if (!target.create) throw new ValidationError(target.readOnly ?? `${target.path} can't be created.`);
@@ -376,7 +498,10 @@ export class Workspace {
     }
     if (target.key.startsWith("message:") && text.trim() === "") throw new ValidationError("A message can't be empty.");
     this.setValue(target.key, text);
-    return this.agent.addEdit({ ...ctx, path: target.path, target: target.key, before: target.value, after: text, meta: null });
+    // Logged as it reads back: a list (the cast, the layout) is kept in its own form, so a later revert sees it unchanged.
+    const after = this.valueOf(target.key) ?? text;
+    if (after === target.value) throw new ValidationError(`${target.path} already says that. Nothing changed.`);
+    return this.agent.addEdit({ ...ctx, path: target.path, target: target.key, before: target.value, after, meta: null });
   }
 
   /** Delete what's at a path. Logged, with what's needed to put it back. */
@@ -398,6 +523,14 @@ export class Workspace {
     if (kind === "cast") {
       try {
         return this.castText(id!);
+      } catch {
+        return null;
+      }
+    }
+    if (kind === "layout") {
+      try {
+        this.store.chat(id!);
+        return this.layoutText(id!);
       } catch {
         return null;
       }
@@ -431,6 +564,7 @@ export class Workspace {
       swipes[index] = text;
       this.store.db.query("UPDATE messages SET swipes = ?, edited_at = ? WHERE id = ?").run(JSON.stringify(swipes), new Date().toISOString(), id!);
     } else if (kind === "cast") this.setCastText(id!, text);
+    else if (kind === "layout") this.setLayoutText(id!, text);
     else if (kind === "file") this.agent.writeFile(rest, text);
     else throw new ValidationError(`Unknown change target ${key}.`);
   }
@@ -474,13 +608,14 @@ export class Workspace {
     } else throw new ValidationError("That can't be put back: what held it is gone.");
   }
 
-  private delete(key: string): void {
+  /** Remove what a key holds; returns what's needed to put it back where it was. */
+  private delete(key: string): Record<string, unknown> | null {
     const [kind, id] = key.split(":");
     const rest = key.slice(kind!.length + 1);
-    if (kind === "file") this.agent.deleteFile(rest);
-    else if (kind === "field") this.store.db.query("DELETE FROM card_fields WHERE id = ?").run(id!);
-    else if (kind === "block") this.store.deleteBlock(id!);
-    else throw new ValidationError("That can't be removed.");
+    if (kind === "file") return (this.agent.deleteFile(rest), null);
+    if (kind === "field") return this.removeField(id!);
+    if (kind === "block") return this.removeBlock(id!);
+    throw new ValidationError("That can't be removed.");
   }
 
   /**
@@ -488,7 +623,7 @@ export class Workspace {
    * after the agent did), it's left alone unless `force` is set, so a
    * revert never throws away newer work without asking.
    */
-  revert(editId: string, force = false): AgentEdit {
+  revert(editId: string, force = false, setAside = false): AgentEdit {
     const edit = this.agent.edit(editId);
     if (edit.revertedAt) throw new ValidationError("That change is already reverted.");
     const now = this.valueOf(edit.target);
@@ -497,11 +632,57 @@ export class Workspace {
     }
     this.store.db.transaction(() => {
       if (edit.before === null) {
-        if (now !== null) this.delete(edit.target);
+        // Taking away something it made: keep where it was, so it can be put back.
+        if (now !== null) this.agent.setEditMeta(edit.id, this.delete(edit.target));
       } else if (now === null) this.restore(edit.target, edit.before, edit.meta);
       else this.setValue(edit.target, edit.before);
     })();
-    return this.agent.markReverted(edit.id);
+    return this.agent.markReverted(edit.id, setAside);
+  }
+
+  /**
+   * Undo several changes at once, newest first (a reroll or a rewind taking
+   * back what its answers did). Checks them all first, so a conflict
+   * leaves everything as it was, unless `force`. `setAside` marks them to
+   * be put back if that answer's version is switched back to.
+   */
+  revertEdits(edits: AgentEdit[], force = false, setAside = false): AgentEdit[] {
+    const open = edits.filter((e) => !e.revertedAt).sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    if (!force) {
+      const simulated = new Map<string, string | null>();
+      for (const e of open) {
+        const current = simulated.has(e.target) ? simulated.get(e.target)! : this.valueOf(e.target);
+        if (current !== e.after) throw new ConflictError(`${e.path} has changed since the agent's edit, so undoing what it did would also undo your newer changes. Go ahead anyway to put back the text from before.`);
+        simulated.set(e.target, e.before);
+      }
+    }
+    return open.map((e) => this.revert(e.id, true, setAside));
+  }
+
+  /**
+   * Put changes back in place, oldest first (switching back to an answer's
+   * version). Checks them all first, so a conflict changes nothing, unless `force`.
+   */
+  reapplyEdits(edits: AgentEdit[], force = false): AgentEdit[] {
+    const order = edits.filter((e) => e.revertedAt).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+    if (!force) {
+      const simulated = new Map<string, string | null>();
+      for (const e of order) {
+        const current = simulated.has(e.target) ? simulated.get(e.target)! : this.valueOf(e.target);
+        if (current !== e.before) throw new ConflictError(`${e.path} has changed since that version, so putting its changes back would undo your newer ones. Go ahead anyway to put that version's text back.`);
+        simulated.set(e.target, e.after);
+      }
+    }
+    return order.map((e) => {
+      const now = this.valueOf(e.target);
+      this.store.db.transaction(() => {
+        if (e.after === null) {
+          if (now !== null) this.agent.setEditMeta(e.id, this.delete(e.target));
+        } else if (now === null) this.restore(e.target, e.after, this.agent.edit(e.id).meta);
+        else this.setValue(e.target, e.after);
+      })();
+      return this.agent.markApplied(e.id);
+    });
   }
 
   /** Undo every change of one turn, newest first. Stops at the first conflict unless `force`. */

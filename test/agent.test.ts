@@ -496,3 +496,170 @@ describe("agent turns, streamed", () => {
     expect((await call("GET", `/api/agent/sessions/${session.id}`)).data.busy).toBe(false);
   });
 });
+
+// ------------------------------------------------- rerolls, edits, rewind, branch
+
+describe("agent chat: rerolls, edits, rewind and branch", () => {
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "anoesia-agent-"));
+    script = [];
+    received = [];
+    fake = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        received.push((await request.json()) as (typeof received)[number]);
+        const message = script.shift() ?? { content: "(out of script)" };
+        return Response.json({ model: "agent/model", choices: [{ message, finish_reason: "stop" }] });
+      },
+    });
+    app = createApp(loadConfig({ DATA_DIR: dir, NANOGPT_API_KEY: "k", NANOGPT_BASE_URL: `http://127.0.0.1:${fake.port}/v1` }));
+  });
+
+  afterEach(() => {
+    app.close();
+    fake.stop(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function ready() {
+    const profile = (await call("POST", "/api/profiles", { name: "Agent", model: "agent/model" })).data;
+    await call("PATCH", "/api/settings", { agentProfileId: profile.id, mainPrompt: "Main v1." });
+    return (await call("POST", "/api/agent/sessions", {})).data;
+  }
+  const main = async () => (await call("GET", "/api/state")).data.settings.mainPrompt;
+  const shown = (view: any) => view.messages.filter((m: any) => !m.hidden).map((m: any) => m.content);
+
+  test("a reroll undoes what the answer did, and switching versions puts each one's changes back", async () => {
+    const session = await ready();
+    script.push({ content: "", tool_calls: [toolCall("a", "write", { path: "prompt/main", content: "Main A." })] }, { content: "Wrote A." });
+    await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Rewrite the main prompt." });
+    expect(await main()).toBe("Main A.");
+
+    script.push({ content: "", tool_calls: [toolCall("b", "write", { path: "prompt/main", content: "Main B." })] }, { content: "Wrote B." });
+    const rerolled = (await call("POST", `/api/agent/sessions/${session.id}/reroll`, {})).data;
+    expect(rerolled.error).toBeUndefined();
+    expect(await main()).toBe("Main B.");
+    expect(shown(rerolled)).toEqual(["Rewrite the main prompt.", "", expect.any(String), "Wrote B."]);
+    // The model saw your message and not the first answer.
+    expect(JSON.stringify(received.at(-2)!.messages)).not.toContain("Wrote A.");
+    expect(received.at(-2)!.messages.filter((m) => m.role === "user")).toHaveLength(1);
+
+    // Back to the first version: B's change is set aside, A's put back.
+    const first = (await call("POST", `/api/agent/sessions/${session.id}/version`, { index: 0 })).data;
+    expect(await main()).toBe("Main A.");
+    expect(shown(first).at(-1)).toBe("Wrote A.");
+    await call("POST", `/api/agent/sessions/${session.id}/version`, { index: 1 });
+    expect(await main()).toBe("Main B.");
+
+    // Changed by hand since: switching is refused (409) and changes nothing, unless forced.
+    await call("PATCH", "/api/settings", { mainPrompt: "Mine." });
+    expect((await call("POST", `/api/agent/sessions/${session.id}/version`, { index: 0 })).status).toBe(409);
+    expect(await main()).toBe("Mine.");
+    expect((await call("POST", `/api/agent/sessions/${session.id}/reroll`, {})).status).toBe(409);
+    expect(await main()).toBe("Mine.");
+    script.push({ content: "Left it." });
+    const forced = (await call("POST", `/api/agent/sessions/${session.id}/reroll`, { force: true })).data;
+    expect(await main()).toBe("Main v1.");
+    expect(shown(forced).at(-1)).toBe("Left it.");
+  });
+
+  test("a block the agent made goes on reroll and comes back, in place, with its version", async () => {
+    const session = await ready();
+    const chat = (await call("POST", "/api/chats", { name: "Night Market" })).data;
+    script.push({ content: "", tool_calls: [toolCall("a", "write", { path: "chats/Night Market/blocks/Tone", content: "Keep it dry." })] }, { content: "Added." });
+    await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Add a tone block.", chatId: chat.id });
+    const blocks = async () => (await call("GET", `/api/chats/${chat.id}/blocks`)).data.map((b: any) => b.title);
+    const before = await blocks();
+    expect(before).toContain("Tone");
+    script.push({ content: "Not adding it." });
+    await call("POST", `/api/agent/sessions/${session.id}/reroll`, {});
+    expect(await blocks()).not.toContain("Tone");
+    await call("POST", `/api/agent/sessions/${session.id}/version`, { index: 0 });
+    expect(await blocks()).toEqual(before);
+  });
+
+  test("rewind takes back what came after; editing your message answers it again; branch copies up to a message", async () => {
+    const session = await ready();
+    script.push({ content: "Hi." });
+    await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Hello." });
+    script.push({ content: "", tool_calls: [toolCall("a", "write", { path: "prompt/main", content: "Main A." })] }, { content: "Wrote A." });
+    const view = (await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Rewrite it." })).data;
+    const hi = view.messages.find((m: any) => m.content === "Hi.");
+    const ask = view.messages.find((m: any) => m.content === "Rewrite it.");
+
+    // A branch from the first reply: the conversation to there, in a new session; nothing undone here.
+    const branched = (await call("POST", `/api/agent/messages/${hi.id}/branch`, {})).data;
+    expect(branched.session.id).not.toBe(session.id);
+    expect(shown(branched)).toEqual(["Hello.", "Hi."]);
+    expect(await main()).toBe("Main A.");
+
+    // Editing your message: it's answered again, and the old answer's change is undone.
+    script.push({ content: "Left it alone." });
+    const resent = (await call("POST", `/api/agent/messages/${ask.id}/resend`, { content: "Leave it." })).data;
+    expect(shown(resent)).toEqual(["Hello.", "Hi.", "Leave it.", "Left it alone."]);
+    expect(await main()).toBe("Main v1.");
+
+    // The agent's words can be edited in place.
+    const reply = resent.messages.at(-1);
+    const edited = (await call("PATCH", `/api/agent/messages/${reply.id}`, { content: "Left it." })).data;
+    expect(shown(edited).at(-1)).toBe("Left it.");
+
+    // Rewind to the first reply: the rest goes.
+    script.push({ content: "", tool_calls: [toolCall("b", "write", { path: "prompt/main", content: "Main B." })] }, { content: "Wrote B." });
+    await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Now do it." });
+    expect(await main()).toBe("Main B.");
+    expect((await call("GET", `/api/agent/messages/${hi.id}/rewind`)).data.changes).toBe(1);
+    const rewound = (await call("POST", `/api/agent/messages/${hi.id}/rewind`, {})).data;
+    expect(shown(rewound)).toEqual(["Hello.", "Hi."]);
+    expect(await main()).toBe("Main v1.");
+  });
+});
+
+describe("versions, reasoning and the layout as paths", () => {
+  test("a message's versions and reasoning can be listed and read; a version can be edited, reasoning can't", () => {
+    const { ws, ctx, store, chat } = world();
+    const message = store.messages(chat.id)[1]!;
+    store.addSwipe(message.id, "Ada laughs.", "", "", "Make her warmer this time.");
+    const listed = ws.list("chats/Night Market/messages");
+    expect(listed[1]!.note).toContain("2 versions, 2 shown");
+    expect(listed[1]!.note).toContain("has reasoning");
+    const one = ws.list("chats/Night Market/messages/2").map((e) => e.path);
+    expect(one).toEqual(["chats/Night Market/messages/2/reasoning", "chats/Night Market/messages/2/versions/1", "chats/Night Market/messages/2/versions/2"]);
+    expect(ws.read("chats/Night Market/messages/2/reasoning").text).toBe("Make her warmer this time.");
+    expect(ws.read("chats/Night Market/messages/2/versions/1").text).toBe("Ada smirks. She checks the setlist twice.");
+    expect(ws.read("chats/Night Market/messages/2/versions/2/reasoning").text).toBe("Make her warmer this time.");
+    expect(() => ws.read("chats/Night Market/messages/2/versions/1/reasoning")).toThrow("no saved reasoning");
+    expect(() => ws.read("chats/Night Market/messages/2/versions/3")).toThrow("2 versions");
+    expect(() => ws.write("chats/Night Market/messages/2/reasoning", "No.", ctx)).toThrow("never changed");
+
+    // Editing a version that isn't shown changes that version only, and reverts.
+    const edit = ws.write("chats/Night Market/messages/2/versions/1", "Ada smirks, then laughs.", ctx);
+    expect(store.message(message.id).swipes).toEqual(["Ada smirks, then laughs.", "Ada laughs."]);
+    expect(store.message(message.id).content).toBe("Ada laughs.");
+    ws.revert(edit.id);
+    expect(store.message(message.id).swipes[0]).toBe("Ada smirks. She checks the setlist twice.");
+  });
+
+  test("the layout switches, moves and places blocks, and reverts", () => {
+    const { ws, ctx, store, chat } = world();
+    ws.write("chats/Night Market/blocks/Group pace", "Give everyone a beat.", ctx);
+    const before = ws.read("chats/Night Market/layout").text;
+    expect(before).toContain("(chat history)");
+    expect(before).toMatch(/Group pace \| on \| system$/m);
+    const lines = before.split("\n").map((l) => l.replace(/^\d+\.\s*/, ""));
+    const pace = lines.find((l) => l.startsWith("Group pace"))!;
+    const moved = [pace.replace("| on | system", "| off | user | depth 0"), ...lines.filter((l) => l !== pace)].join("\n");
+    const edit = ws.write("chats/Night Market/layout", moved, ctx);
+    const blocks = store.blocks(chat.id);
+    expect(blocks[0]).toMatchObject({ title: "Group pace", enabled: false, role: "user", depth: 0 });
+    expect(ws.read("chats/Night Market/layout").text.split("\n")[0]).toBe("1. Group pace | off | user | depth 0");
+
+    // Every block once, or nothing changes.
+    expect(() => ws.write("chats/Night Market/layout", lines.slice(1).join("\n"), ctx)).toThrow("every block once");
+    expect(() => ws.write("chats/Night Market/layout", moved.replace("| user |", "| narrator |"), ctx)).toThrow("isn't a role");
+    expect(store.blocks(chat.id)[0]!.title).toBe("Group pace");
+
+    ws.revert(edit.id);
+    expect(ws.read("chats/Night Market/layout").text).toBe(before);
+  });
+});

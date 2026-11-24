@@ -455,6 +455,23 @@ dialog.scene-menu{width:340px;padding:6px;max-height:min(80dvh,600px);overflow:a
 .scene-menu .sc-nudge .switch{flex:none}
 .scene-menu .switch,.scene-menu .switch:hover{width:46px;height:28px;padding:0;border-radius:14px;display:block;background:var(--switch-off-bg)}
 .scene-menu .switch[aria-checked="true"],.scene-menu .switch[aria-checked="true"]:hover{background:var(--blue)}
+/* The story so far: its reach and controls, under its note */
+.sc-sum{display:flex;flex-direction:column;gap:6px}
+.sc-sum p{margin:0}
+.sc-sum-line{font-size:var(--fs-xs);line-height:18px;color:var(--ink-3)}
+.sc-sum-warn{font-size:var(--fs-xs);line-height:18px;color:var(--ink-2);border-left:2px solid var(--pink);padding-left:8px}
+.sc-sum-row{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;min-height:var(--hit)}
+.sc-sum-auto{display:flex;align-items:center;gap:8px}
+.sc-sum-row .meta{white-space:nowrap}
+.scene-menu .sc-sum-acts{padding:0}
+.scene-menu .sc-sum-acts .btn{min-height:44px}
+.scene-menu .sc-inline{display:inline;width:auto;height:auto;min-height:0;padding:0 4px;font-size:inherit;text-decoration:underline;color:var(--ink-1)}
+.scene-menu .btn[aria-disabled="true"]{opacity:.45;cursor:default}
+/* In the chat: the line under the last message the story so far tells */
+.fold-line{display:flex;align-items:center;gap:10px;margin:6px 0;color:var(--ink-4)}
+.fold-line::before,.fold-line::after{content:"";flex:1;height:1px;background:currentColor;opacity:.5}
+.fold-line .meta{color:var(--ink-3);text-align:center}
+.linkish{border:0;background:none;padding:0;margin:0;font:inherit;color:var(--ink-1);text-decoration:underline;cursor:pointer}
 #role-menu button{gap:10px}
 #role-menu button[aria-checked="true"]{background:var(--ghost-hover)}
 #role-menu .role{pointer-events:none}
@@ -596,6 +613,18 @@ dialog.mpick[open]{display:flex}
 .agent-options{display:grid;gap:6px}.agent-option{display:flex;flex-direction:column;text-align:left}
 .agent-error{padding:8px;color:var(--danger-ink)}
 .agent-live{margin:10px 0}.agent-live .agent-msg{margin-top:4px}.agent-live .thinking{margin:2px 0 6px}
+.agent-acts{display:none;align-items:center;gap:2px;margin:2px 0 6px;color:var(--ink-4)}
+.agent-acts.shown,.agent-run:hover>.agent-acts,.agent-ex-user:hover>.agent-acts,.agent-acts:focus-within,.show-acts>.agent-acts{display:flex}
+.agent-ex-user .agent-acts{justify-content:flex-end}.agent-ex-user .agent-acts .spacer{display:none}
+.agent-acts .spacer{flex:1}
+.agent-act{width:36px;height:36px;border-radius:10px;color:var(--ink-4)}
+.agent-act:hover{color:var(--ink-1)}
+.agent-acts .versions{margin-left:0}
+@media (pointer:coarse){.agent-act,.agent-acts .versions .ib{width:44px;height:44px}}
+.agent-msg.editing{white-space:normal}
+.agent-edit-form{display:grid;gap:8px}
+.agent-edit-form textarea{width:100%;box-sizing:border-box;min-height:70px;padding:10px;border-radius:10px;background:var(--sunk-bg);color:var(--ink-1);border:1px solid rgba(255,255,255,.14);font:inherit;resize:vertical}
+.agent-edit-form .row{display:flex;justify-content:flex-end;gap:8px}
 .agent-live-status{font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;font-weight:700}
 @media(max-width:899px){.agent-panel{width:100vw;padding:12px}}
 .agent-edit-head button{white-space:nowrap;flex-shrink:0}
