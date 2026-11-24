@@ -274,7 +274,7 @@ async function follow(chatId, open) {
 }
 
 /** Read server-sent events from a response, calling `each` with each one. Returns whether "done" arrived. */
-async function readEvents(response, each) {
+export async function readEvents(response, each) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

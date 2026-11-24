@@ -383,3 +383,116 @@ describe("agent turns through the server", () => {
     expect((await call("PUT", "/api/agent/files", { path: "../x", content: "" })).status).toBe(400);
   });
 });
+
+// ----------------------------------------------------------- streamed turns
+
+describe("agent turns, streamed", () => {
+  /** Each request answers with the next script entry: SSE chunks (deltas), sent with a small gap, or held open with `hang`. */
+  let streams: { deltas: Record<string, unknown>[]; hang?: boolean }[];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "anoesia-agent-"));
+    streams = [];
+    received = [];
+    fake = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        received.push((await request.json()) as (typeof received)[number]);
+        const next = streams.shift() ?? { deltas: [{ content: "(out of script)" }] };
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            for (const delta of next.deltas) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ model: "agent/model", choices: [{ delta }] })}\n\n`));
+              await Bun.sleep(5);
+            }
+            if (next.hang) {
+              request.signal.addEventListener("abort", () => controller.close());
+              return;
+            }
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    app = createApp(loadConfig({ DATA_DIR: dir, NANOGPT_API_KEY: "k", NANOGPT_BASE_URL: `http://127.0.0.1:${fake.port}/v1` }));
+  });
+
+  afterEach(() => {
+    app.close();
+    fake.stop(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function ready() {
+    const profile = (await call("POST", "/api/profiles", { name: "Agent", model: "agent/model" })).data;
+    await call("PATCH", "/api/settings", { agentProfileId: profile.id });
+    await call("POST", "/api/cards/import", { text: fixture });
+    return (await call("POST", "/api/agent/sessions", {})).data;
+  }
+
+  async function events(response: Response): Promise<any[]> {
+    const text = await response.text();
+    return text
+      .split("\n\n")
+      .filter((b) => b.startsWith("data: "))
+      .map((b) => JSON.parse(b.slice(6)));
+  }
+
+  test("tool calls arrive in pieces and still run; the reply streams; each saved message is told", async () => {
+    const session = await ready();
+    streams.push(
+      {
+        deltas: [
+          { content: "Looking." },
+          { tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "read", arguments: "" } }] },
+          { tool_calls: [{ index: 0, function: { arguments: '{"path":"cards/Ada' } }] },
+          { tool_calls: [{ index: 0, function: { arguments: ' Vale/Description"}' } }] },
+        ],
+      },
+      { deltas: [{ reasoning: "She is 27." }, { content: "Ada is " }, { content: "27." }] },
+    );
+    const response = await app.fetch(new Request(`http://127.0.0.1/api/agent/sessions/${session.id}/send?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "How old is Ada?" }) }));
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const all = await events(response);
+    expect(all[0].type).toBe("start");
+    expect(all[0].busy).toBe(true);
+    const words = all.filter((e) => e.type === "more").map((e) => e.content).join("");
+    expect(words).toContain("Ada is 27.");
+    expect(all.filter((e) => e.type === "more").map((e) => e.reasoning).join("")).toContain("She is 27.");
+    expect(all.filter((e) => e.type === "saved").length).toBe(3);
+    const done = all.at(-1);
+    expect(done.type).toBe("done");
+    expect(done.busy).toBe(false);
+    expect(done.messages.map((m: any) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+    expect(done.messages[1].toolCalls[0].function).toEqual({ name: "read", arguments: '{"path":"cards/Ada Vale/Description"}' });
+    expect(done.messages[2].content).toContain("Lead singer");
+    expect(done.messages[3].content).toBe("Ada is 27.");
+  });
+
+  test("Stop ends a turn partway and keeps the words written so far", async () => {
+    const session = await ready();
+    streams.push({ deltas: [{ content: "Half a " }, { content: "thought" }], hang: true });
+    const response = await app.fetch(new Request(`http://127.0.0.1/api/agent/sessions/${session.id}/send?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "Go." }) }));
+    const reading = events(response);
+    // Busy, and a second message is refused while it runs.
+    await Bun.sleep(60);
+    expect((await call("GET", `/api/agent/sessions/${session.id}`)).data.busy).toBe(true);
+    expect((await call("POST", `/api/agent/sessions/${session.id}/send`, { content: "Again" })).status).toBe(400);
+    // Someone watching from another page sees it too.
+    const watcher = app.fetch(new Request(`http://127.0.0.1/api/agent/sessions/${session.id}/live`)).then(events);
+    await call("POST", `/api/agent/sessions/${session.id}/stop`, {});
+    const all = await reading;
+    const done = all.at(-1);
+    expect(done.type).toBe("done");
+    expect(done.error).toBeUndefined();
+    expect(done.messages.map((m: any) => [m.role, m.content])).toEqual([
+      ["user", "Go."],
+      ["assistant", "Half a thought"],
+    ]);
+    expect((await watcher).at(-1).type).toBe("done");
+    expect((await call("GET", `/api/agent/sessions/${session.id}`)).data.busy).toBe(false);
+  });
+});
