@@ -60,8 +60,9 @@ export function systemPrompt(store: Store, agent: AgentStore, ws: Workspace, cha
 
 - cards/<card>/<field>: a card's fields (Description, Advanced description, System prompt, and custom fields)
 - prompt/main: the main prompt, shared by every chat
-- chats/<chat>/messages/<n>: a chat's messages, 1 is the first; the version shown
+- chats/<chat>/messages/<n>: a chat's messages, 1 is the first; the version shown. list one to see its versions: chats/<chat>/messages/<n>/versions/<k> (each can be read and edited, to stitch lines from one into another), and chats/<chat>/messages/<n>/reasoning (the narrator's reasoning or plan behind the version shown, read only; versions/<k>/reasoning for another version). Read the reasoning when a reply went wrong, to see why.
 - chats/<chat>/blocks/<block>: the blocks on a chat's prompts page, in order. Two are the chat's notes, sent to the roleplay model when they have text: "Right now" (where the story stands) and "Who knows what" (one line per secret). Story state goes there, never in a card: cards describe who someone is.
+- chats/<chat>/layout: every block in the order sent, one "Name | on | system" line each ("| depth N" places it inside the chat history, N messages from the end), and "(chat history)" where the history goes. Edit it to switch blocks on or off, move them, or change their role or depth: list every block once. Add or delete blocks under blocks/.
 - chats/<chat>/cast: who's onstage, one "Name: onstage" or "Name: offstage" line per cast member. Offstage, only the card's Description is sent and {{cast}} leaves them out. Edit a line to move someone on or off stage.
 - agent/index.md (your notes, below), agent/personality.md, agent/notes/, agent/chats/<chat>/ (a folder for each chat)`,
     index ? `## Your notes (agent/index.md)\n\n${index}` : "",

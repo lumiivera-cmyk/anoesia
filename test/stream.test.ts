@@ -100,3 +100,13 @@ test("Vertex AI: when Google refuses reasoning_effort beside the thoughts reques
     fake.stop(true);
   }
 });
+
+test("a reasoning tag later in a reply is the reply talking about tags, not reasoning", () => {
+  const explaining = "The Reasoning block asks for a plan in <thinking> tags. The parser folds that away, and the reply comes after.";
+  expect(liveReply(explaining, "")).toEqual({ reasoning: "", content: explaining });
+  const both = "Write <thinking>your plan</thinking> first, then the scene.";
+  expect(liveReply(both, "")).toEqual({ reasoning: "", content: both });
+  // At the start it's still reasoning, closed or not, and a dropped opening tag still works.
+  expect(liveReply("<thinking>Plan</thinking>Then <thinking> is just a word.", "")).toEqual({ reasoning: "Plan", content: "Then <thinking> is just a word." });
+  expect(liveReply("Plan</think>Hi, and </think> after.", "")).toEqual({ reasoning: "Plan", content: "Hi, and </think> after." });
+});

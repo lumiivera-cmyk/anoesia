@@ -650,26 +650,28 @@ export function readReasoning(message: ReasoningFields | undefined, rawContent: 
  * closed (cut off at Max tokens) thinks to the end.
  */
 function thinkParts(text: string): { reasoning: string[]; rest: string } {
+  // Only reasoning at the start counts: a model thinks before it writes. A tag
+  // later in the reply is the reply talking about tags (explaining how a
+  // reasoning block works, say), so it stays as text.
   const reasoning: string[] = [];
-  let rest = text.replace(/<(thinking|thought|think|reasoning)>([\s\S]*?)<\/\1>/gi, (_m, _tag: string, inside: string) => {
-    reasoning.push(inside);
-    return "";
-  });
-  const close = /<\/(thinking|thought|think|reasoning)>/gi;
-  let end = -1;
-  let endLength = 0;
-  for (let m = close.exec(rest); m; m = close.exec(rest)) {
-    end = m.index;
-    endLength = m[0].length;
+  let rest = text;
+  const lead = /^\s*<(thinking|thought|think|reasoning)>([\s\S]*?)<\/\1>/i;
+  for (let m = lead.exec(rest); m; m = lead.exec(rest)) {
+    reasoning.push(m[2]!);
+    rest = rest.slice(m[0].length);
   }
-  if (end >= 0) {
-    reasoning.unshift(rest.slice(0, end).replace(close, ""));
-    rest = rest.slice(end + endLength);
+  // A closing tag with no opening one before it: the opening tag was dropped
+  // (DeepSeek sends <think> as a special token), so what comes first is reasoning.
+  const close = /<\/(thinking|thought|think|reasoning)>/i.exec(rest);
+  if (close && !/<(thinking|thought|think|reasoning)>/i.test(rest.slice(0, close.index))) {
+    reasoning.push(rest.slice(0, close.index));
+    rest = rest.slice(close.index + close[0].length);
   }
-  const open = /<(thinking|thought|think|reasoning)>/i.exec(rest);
+  // Still thinking (a reply cut short, or one arriving): an opening tag at the start with no end yet.
+  const open = /^\s*<(thinking|thought|think|reasoning)>/i.exec(rest);
   if (open) {
-    reasoning.push(rest.slice(open.index + open[0].length));
-    rest = rest.slice(0, open.index);
+    reasoning.push(rest.slice(open[0].length));
+    rest = "";
   }
   return { reasoning: reasoning.map((r) => r.trim()).filter(Boolean), rest: rest.trim() };
 }
