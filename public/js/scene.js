@@ -131,7 +131,7 @@ function render() {
   const presetButtons = PRESETS.filter((p) => !nudges().some((n) => n.title === p.title || n.content.includes(p.marker)))
     .map((p) => `<button type="button" class="raised press btn" data-preset="${p.preset}">${icon.plus(16)}${p.label}</button>`)
     .join("");
-  // Only the body is redrawn: in selenite the sheet's plate lives in the dialog beside it.
+  // Only the body is redrawn, so the sheet itself stays put.
   let body = menu().querySelector(":scope > .sc-body");
   if (!body) menu().append((body = Object.assign(document.createElement("div"), { className: "sc-body" })));
   body.innerHTML = `

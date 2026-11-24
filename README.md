@@ -112,10 +112,6 @@ Pieces are lifted from [Amaedori](https://github.com/lumiivera-cmyk/amaedori)
   than the readable defaults, so you can always read your way back; the
   preview shows the real result. Each card has a bead colour: violet, blue, pink or any
   colour from the picker.
-- **Selenite, in Settings**: pick Selenite under Settings → Look and Settings
-  turns to crystal plates that bend the photo behind them (or neon tubes, if
-  you pick no photo), on phone and desktop. The rest of the app stays lacquer
-  until each page gets its selenite pass.
 - **The cards page**: every card by kind, its fields in send order (drag the
   bumps, use the arrow keys, or tap them for move options), where it's used,
   and what deleting it would take with it. Reordering a card's fields also
@@ -149,15 +145,6 @@ app's own layout is in `public/app.css`. No photos ship with the app: the
 design's six came from a wallpaper site with no licence to share them, so
 you upload your own in settings. Each photo's tint is worked out from its
 colours when it's added.
-
-Selenite's crystal plates are painted in the browser, not shipped as images:
-`public/js/selenite/paint.js` is a port of the handoff's `make_selenite.py`
-(the displacement map, mask, crystal, light and under-glow for one outline),
-run in a worker. `plates.js` holds the outlines from the handoff's layout
-files, fits them to each plate's real size, and keeps what it painted in the
-browser's cache, so a plate repaints only when its size changes. Chromium
-bends the photo through an SVG displacement filter; Safari and Firefox get
-the same plates over a plain blur.
 
 Not in this version, though designed: nudges (step 4).
 

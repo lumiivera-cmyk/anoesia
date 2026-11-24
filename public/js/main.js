@@ -6,7 +6,7 @@
 import { $, attempt, go, loadState, showError, state } from "./core.js";
 import { icon } from "./icons.js";
 import { openDrawer, renderSide, wireSide } from "./side.js";
-import { applyBackground, applyMaterial, watchDialogs } from "./theme.js";
+import { applyBackground } from "./theme.js";
 import { openChat, showChatView, wireChat } from "./chat.js";
 import { showPrompts, wirePrompts } from "./prompts.js";
 import { wireScene } from "./scene.js";
@@ -40,7 +40,6 @@ async function route() {
 function showView(name) {
   for (const v of ["chat", "prompts", "cards", "settings"]) $(`view-${v}`).hidden = v !== name;
   document.documentElement.dataset.view = name;
-  applyMaterial();
   if (name !== "chat") $(`view-${name}`).querySelector("h1")?.focus({ preventScroll: true });
 }
 
@@ -60,11 +59,12 @@ async function start() {
   wireSettings();
   wireTextEditor();
   wireAgent();
-  watchDialogs();
   $("confirm-icon").innerHTML = icon.trash(16);
   for (const h of document.querySelectorAll("h1")) h.tabIndex = -1;
   // Lets Android Chrome install Anoesia as a full-screen app (public/sw.js).
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  // The retired selenite material kept its painted plates in Cache Storage: let them go.
+  globalThis.caches?.keys().then((keys) => keys.filter((k) => k.startsWith("selenite")).forEach((k) => caches.delete(k))).catch(() => {});
   try {
     await loadState();
   } catch (error) {

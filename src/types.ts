@@ -145,12 +145,8 @@ export interface Photo {
 /** Lacquer finishes: opaque, 72% with a blur, or 50% with a lighter blur. */
 export type Finish = "roiro" | "tamenuri" | "shunkei";
 
-/** The app's material: lacquer panes, or selenite crystal plates. */
-export type Material = "lacquer" | "selenite";
-
 export interface Background {
-  material: Material;
-  /** An uploaded photo's id, or "none" (selenite shows its neon tubes then). */
+  /** An uploaded photo's id, or "none". */
   photo: string;
   finish: Finish;
   /** How far the photo's hue tints the lacquer, 0 to 1. */

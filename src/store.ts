@@ -13,7 +13,7 @@ import type { Background, BlockKind, StoryState, Card, CardField, Chat, FieldKey
 
 const now = () => new Date().toISOString();
 
-export const DEFAULT_BACKGROUND: Background = { material: "lacquer", photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
+export const DEFAULT_BACKGROUND: Background = { photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null };
 
 const DEFAULT_SETTINGS: Settings = {
   rpProfileId: "",
@@ -70,7 +70,7 @@ export class Store {
     const rows = this.db.query("SELECT key, value FROM settings").all() as { key: string; value: string }[];
     const out: Settings = { ...DEFAULT_SETTINGS };
     for (const row of rows) if (row.key in out) (out as unknown as Row)[row.key] = JSON.parse(row.value);
-    out.background = { ...DEFAULT_BACKGROUND, ...out.background };
+    out.background = backgroundFromStore(out.background);
     // A photo that's gone (or one of the old built-in names) shows as none.
     if (out.background.photo !== "none" && !this.findPhoto(out.background.photo)) out.background.photo = "none";
     if (out.rpProfileId && !this.findProfile(out.rpProfileId)) out.rpProfileId = "";
@@ -845,6 +845,18 @@ function colourInput(value: unknown): string {
   return hex;
 }
 
+/**
+ * A stored background, filled in with the defaults. Selenite was retired:
+ * its `material` field is dropped, and its own readable dim (0.35) goes back
+ * to lacquer's.
+ */
+function backgroundFromStore(stored: unknown): Background {
+  const { material, ...rest } = (stored ?? {}) as Partial<Background> & { material?: string };
+  const out: Background = { ...DEFAULT_BACKGROUND, ...rest };
+  if (material === "selenite" && out.dim === 0.35) out.dim = DEFAULT_BACKGROUND.dim;
+  return out;
+}
+
 function backgroundInput(raw: unknown, current: Background): Background {
   if (typeof raw !== "object" || raw === null) throw new ValidationError("The background settings must be an object.");
   const b = raw as Row;
@@ -852,10 +864,6 @@ function backgroundInput(raw: unknown, current: Background): Background {
   if (b.photo !== undefined) {
     if (typeof b.photo !== "string" || !b.photo) throw new ValidationError("The background photo is a photo's id, or none.");
     out.photo = b.photo;
-  }
-  if (b.material !== undefined) {
-    if (b.material !== "lacquer" && b.material !== "selenite") throw new ValidationError("The material is lacquer or selenite.");
-    out.material = b.material;
   }
   if (b.finish !== undefined) {
     if (!FINISHES.includes(b.finish as Finish)) throw new ValidationError("The finish is roiro, tamenuri or shunkei.");

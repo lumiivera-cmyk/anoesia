@@ -1,15 +1,12 @@
 /* =====================================================================================
    Anoesia: shared stylesheet
-   One look, two materials. Every board (and the app) loads this file and sets ONE theme
-   class on its root: .theme-lacquer or .theme-selenite. Components use the same class
-   names in both; only the theme decides what "raised", "sunk", a switch or a gem
-   looks like.
+   One look: lacquer. The app's root carries the theme class .theme-lacquer, and the
+   theme decides what "raised", "sunk", a switch or a gem looks like.
 
    Layers:  1 tokens  ·  2 themes  ·  3 base  ·  4 text  ·  5 materials  ·  6 controls
-            7 chat  ·  8 prompts page  ·  9 overlays  ·  10 selenite plate machinery
+            7 chat  ·  8 prompts page  ·  9 overlays
    Components are written once and read theme variables (--raised-bg, --sunk-shadow ...);
-   a theme is a set of those variables. Only gems are built differently per theme, so those
-   few rules are theme-scoped; section 10 exists only in selenite.
+   a theme is a set of those variables. Gems are the exception, scoped to the theme.
    Desktop and phone share every rule; where touch needs more room, a (pointer:coarse)
    query says so.
    State lives in attributes, not in style strings:
@@ -78,30 +75,6 @@
   --press-shift:2px;--press-filter:none;
   color:var(--ink-1);font-family:var(--font);
 }
-.theme-selenite{
-  --ink-1:#F4F0FB;
-  --ink-2:#E8E2F2;
-  --ink-3:#D4CEE2;
-  --ink-4:#C4BED5;  /* brighter than lacquer's: captions sit over streaks, neon and frost */
-  --ink-5:#ACA6BE;
-  --page:#030305; --ground:#060609;
-  --ghost-hover:rgba(255,255,255,.08);
-  --ground-bg:radial-gradient(ellipse 30% 40% at 12% 70%,rgba(168,108,255,.12),rgba(0,0,0,0) 70%),radial-gradient(ellipse 40% 22% at 45% 4%,rgba(77,184,255,.1),rgba(0,0,0,0) 70%),radial-gradient(ellipse 28% 45% at 90% 30%,rgba(255,79,216,.11),rgba(0,0,0,0) 70%),radial-gradient(ellipse 45% 18% at 50% 100%,rgba(77,184,255,.1),rgba(0,0,0,0) 70%),linear-gradient(rgba(255,255,255,.025) 1px,rgba(0,0,0,0) 1px) 0 0/22px 22px,linear-gradient(90deg,rgba(255,255,255,.025) 1px,rgba(0,0,0,0) 1px) 0 0/22px 22px,radial-gradient(rgba(255,255,255,.035) .6px,rgba(0,0,0,0) 1px) 0 0/3px 3px,var(--ground);
-  --raised-bg:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,.035));
-  --raised-shadow:inset 0 1px 2px rgba(255,255,255,.14),inset 0 -1px 3px rgba(0,0,0,.22),0 1px 4px rgba(0,0,0,.18);
-  --raised-on-bg:linear-gradient(180deg,rgba(255,255,255,.15),rgba(255,255,255,.07));
-  --raised-on-shadow:inset 0 1px 3px rgba(255,255,255,.22),inset 0 -1px 4px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.22);
-  --raised-hover-bg:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.06));
-  --sunk-bg:rgba(0,0,0,.3);
-  --sunk-shadow:inset 0 2px 7px rgba(0,0,0,.55),inset 0 -2px 4px -2px rgba(255,255,255,.1);
-  --switch-off-bg:rgba(0,0,0,.35);
-  --switch-off-shadow:inset 0 2px 5px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.16);
-  --switch-on-shadow:inset 0 1px 2px rgba(255,255,255,.55),0 0 8px rgba(77,184,255,.85),0 0 22px rgba(77,184,255,.45);
-  --seg-on:rgba(255,255,255,.14);
-  --press-shift:1px;--press-filter:brightness(1.12);
-  color:var(--ink-1);font-family:var(--font);
-}
-
 /* 3 · BASE --------------------------------------------------------------------------- */
 body{margin:0;background:#040406}
 a{color:var(--ink-1)}a:hover{color:#FFFFFF}
@@ -123,8 +96,6 @@ textarea::placeholder,input::placeholder{color:var(--ink-5)}
 .prose p:last-child{margin-bottom:0}
 .eyebrow{font-size:var(--fs-xs);line-height:16px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4)}
 .meta{font-size:var(--fs-sm);line-height:19px;color:var(--ink-4)}
-/* selenite plate content: lifts text above the crystal layers and gives it a soft shadow */
-.body{position:relative;z-index:3;text-shadow:0 1px 2px rgba(0,0,0,.6),0 0 10px rgba(0,0,0,.35)}
 
 /* 5 · MATERIALS ---------------------------------------------------------------------- */
 /* raised: a piece you can press. sunk: a well things sit in. ghost: no surface until hover. */
@@ -137,27 +108,19 @@ textarea::placeholder,input::placeholder{color:var(--ink-5)}
 .press{transition:translate .08s,filter .08s}
 .press:active{translate:0 var(--press-shift);filter:var(--press-filter)}
 
-/* gems: lacquer beads, selenite marbles. Text on a gem uses --on-<colour>. */
+/* gems: lacquer beads. Text on a gem uses --on-<colour>. */
 .gem{position:relative;display:grid;place-items:center;border-radius:50%;flex:none;font-weight:700;overflow:hidden}
 .theme-lacquer .gem{box-shadow:inset 0 -3px 5px rgba(255,255,255,.28),inset 0 1px 1px rgba(255,255,255,.7),0 0 0 1.5px rgba(0,0,0,.5),0 2px 4px rgba(0,0,0,.5)}
 .theme-lacquer .gem::before{content:"";position:absolute;left:16%;right:16%;top:6%;height:42%;border-radius:50%;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,0));pointer-events:none}
 .theme-lacquer .gem-pink{background:radial-gradient(circle at 50% 85%,#FFE0F6,#FF6FD8 45%,#B01C8A 90%);color:var(--on-pink)}
 .theme-lacquer .gem-violet{background:radial-gradient(circle at 50% 85%,#EEDCFF,#B488FF 45%,#5B22B8 90%);color:var(--on-violet)}
 .theme-lacquer .gem-blue{background:radial-gradient(circle at 50% 85%,#DDF3FF,#62C3FF 45%,#0F5F9E 90%);color:var(--on-blue)}
-.theme-selenite .gem{isolation:isolate;color:#FFF7FF;text-shadow:0 1px 2px rgba(0,0,0,.7)}
-.theme-selenite .gem::before{content:"";position:absolute;inset:0;border-radius:50%;z-index:1;pointer-events:none;box-shadow:inset 0 2px 4px rgba(8,0,24,.6),inset 0 -2px 3px rgba(255,255,255,.4),inset 0 0 0 .5px rgba(255,255,255,.25)}
-.theme-selenite .gem::after{content:"";position:absolute;inset:0;border-radius:50%;z-index:2;pointer-events:none;background:radial-gradient(36% 24% at 35% 23%,rgba(255,255,255,.95),rgba(255,255,255,.5) 45%,rgba(255,255,255,0) 74%),radial-gradient(circle at 71% 75%,rgba(255,255,255,.55) 0 3.5%,rgba(255,255,255,0) 8%),radial-gradient(closest-side,rgba(255,255,255,0) 82%,rgba(255,255,255,.2) 92%,rgba(255,255,255,0) 100%)}
-.theme-selenite .gem-violet{background:radial-gradient(56% 40% at 50% 85%,rgba(226,196,255,.85),rgba(226,196,255,0) 72%),conic-gradient(from 230deg at 50% 55%,rgba(255,60,140,.55),rgba(255,60,140,0) 70deg,rgba(80,110,255,0) 150deg,rgba(80,110,255,.6) 205deg,rgba(80,110,255,0) 262deg,rgba(255,60,140,0) 300deg,rgba(255,60,140,.55) 360deg),radial-gradient(circle at 50% 47%,#9350e6 0%,#6a26c4 38%,#3d0f86 72%,#1c0546 100%)}
-.theme-selenite .gem-blue{background:radial-gradient(62% 46% at 50% 85%,rgba(206,240,255,.95),rgba(206,240,255,0) 74%),radial-gradient(circle at 50% 46%,#56aeff 0%,#2380ec 40%,#0d4fb4 74%,#062a6e 100%)}
-.theme-selenite .gem-pink{background:radial-gradient(56% 40% at 50% 85%,rgba(255,196,228,.85),rgba(255,196,228,0) 72%),linear-gradient(180deg,rgba(70,0,30,.5) 0%,rgba(70,0,30,0) 30%,rgba(70,0,30,0) 68%,rgba(70,0,30,.45) 100%),radial-gradient(circle at 50% 47%,#ff58b6 0%,#e21f88 40%,#9c0a5a 74%,#4e0330 100%)}
-.theme-selenite .gem-pink::before{background:repeating-linear-gradient(90deg,rgba(255,214,238,0) 0 3px,rgba(255,214,238,.2) 3px 3.6px,rgba(255,214,238,0) 3.6px 7px);-webkit-mask:linear-gradient(180deg,rgba(0,0,0,0),#000 28%,#000 72%,rgba(0,0,0,0));mask:linear-gradient(180deg,rgba(0,0,0,0),#000 28%,#000 72%,rgba(0,0,0,0))}
 /* custom gems: any colour. The card stores a hex and the gem carries it as --gem; highlight, shadow
    and initials are derived from it, so one rule serves every colour (OKLCH relative colour syntax).
    Initials flip at OKLCH lightness 0.5: lighter beads get dark initials, darker beads get light
-   initials with a shadow. The presets above keep their hand-tuned looks, selenite's shimmer and stripes included. */
+   initials with a shadow. The presets above keep their hand-tuned looks. */
 .gem-custom{--gem:#B488FF}
 .theme-lacquer .gem-custom{background:radial-gradient(circle at 50% 85%,oklch(from var(--gem) calc(l + (1 - l) * .74) calc(c * .27) h),var(--gem) 45%,oklch(from var(--gem) calc(l * .63) min(calc(c * 1.15), .25) h) 90%);color:oklch(from var(--gem) clamp(.22, (.5 - l) * 1000, .99) min(calc(c * .5), .1) h);text-shadow:0 1px 2px oklch(from var(--gem) 0 0 0 / clamp(0, (.5 - l) * 1000, .6))}
-.theme-selenite .gem-custom{background:radial-gradient(56% 40% at 50% 85%,oklch(from var(--gem) calc(l + (1 - l) * .7) calc(c * .4) h / .85),oklch(from var(--gem) calc(l + (1 - l) * .7) calc(c * .4) h / 0) 72%),radial-gradient(circle at 50% 47%,oklch(from var(--gem) min(calc(l + .12), .95) c h) 0%,var(--gem) 40%,oklch(from var(--gem) calc(l * .74) calc(c * .9) h) 74%,oklch(from var(--gem) calc(l * .47) calc(c * .6) h) 100%);color:oklch(from var(--gem) clamp(.2, (.5 - l) * 1000, .985) min(calc(c * .4), .08) h);text-shadow:0 1px 2px oklch(from var(--gem) 0 0 0 / clamp(0, (.5 - l) * 1000, .7))}
 .glow-violet{box-shadow:var(--glow-violet)}
 .glow-blue{box-shadow:var(--glow-blue)}
 .glow-pink{box-shadow:var(--glow-pink)}
@@ -339,28 +302,3 @@ textarea::placeholder,input::placeholder{color:var(--ink-5)}
 .menu{position:absolute;z-index:6;border-radius:18px;padding:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 0 0 1px rgba(255,255,255,.1),0 22px 50px rgba(0,0,0,.75)}
 .menu button{width:100%;height:48px;border:0;background:transparent;border-radius:var(--r-md);display:flex;align-items:center;gap:12px;padding:0 12px;font-size:var(--fs-md);font-weight:700;text-align:left}
 .menu button:hover{background:var(--ghost-hover)}
-
-/* 10 · SELENITE PLATE MACHINERY ------------------------------------------------------ */
-/* A plate = .gl box holding: .fx (refraction + smoke), .light, .zone (painted crystal), .spec (light),
-   twinkles, then .body with the UI. Plate-specific images and filters (fx-<name>, mk-<name>,
-   zone-<name>, spec-<name>) stay with the board, since they're generated per plate outline. */
-.gl{position:absolute;z-index:2}
-.fx{position:absolute;inset:0;z-index:0;background:rgba(10,8,18,.34)}
-.light{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(170deg,rgba(235,240,255,.06),rgba(255,255,255,0) 30%,rgba(255,255,255,0) 75%,rgba(220,225,255,.04))}
-.zone,.spec{position:absolute;inset:0;pointer-events:none;background-repeat:no-repeat;background-size:100% 100%}
-.zone{z-index:1}
-.spec{z-index:2}
-.under{position:absolute;z-index:1;pointer-events:none}
-.tw{position:absolute;z-index:2;width:24px;height:24px;margin:-12px 0 0 -12px;pointer-events:none;background:radial-gradient(circle,rgba(255,255,255,1) 0 1.3px,rgba(255,255,255,.45) 2.4px,rgba(255,255,255,0) 4.5px),linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.9) 50%,rgba(255,255,255,0)) center/100% 1.3px no-repeat,linear-gradient(0deg,rgba(255,255,255,0),rgba(255,255,255,.9) 50%,rgba(255,255,255,0)) center/1.3px 100% no-repeat;animation:twinkle 4.6s ease-in-out infinite}
-@keyframes twinkle{0%,100%{opacity:.12;transform:scale(.45)}45%{opacity:1;transform:scale(1)}60%{opacity:.8;transform:scale(.9)}}
-@media (prefers-reduced-motion:reduce){.tw{animation:none;opacity:.7}}
-/* elements cut to a plate's outline: .cut holds a .shape (clipped surface + .edge stroke) under its content */
-.cut{position:absolute;border:0;padding:0;margin:0;background:transparent;text-align:left;color:inherit;font:inherit}
-.cutrow{position:absolute}
-.shape{position:absolute;inset:0;pointer-events:none}
-.shape.raised,.shape.sunk{box-shadow:none}
-.edge{position:absolute;left:0;top:0;overflow:visible}
-.cut:hover .shape.raised{background:var(--raised-hover-bg,var(--raised-bg))}
-.cut:hover .shape.ghost,.cut:active .shape.ghost,.cutrow:hover .shape{background:rgba(255,255,255,.1)}
-.cut:focus-visible{outline:none}
-.cut:focus-visible .ring{stroke:var(--focus);stroke-width:6px}

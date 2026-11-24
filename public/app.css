@@ -701,13 +701,8 @@ dialog.mpick[open]{display:flex}
 .choice[aria-disabled="true"]{cursor:default}
 .choice .chk{position:absolute;right:8px;top:8px;width:22px;height:22px;border-radius:50%;display:none;place-items:center;background:var(--ink-1);color:#0A0A0F}
 .choice[aria-checked="true"] .chk{display:grid}
-.mat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.mat{padding:14px 14px 12px;display:flex;flex-direction:column;gap:4px}
-.mat .sw{height:46px;border-radius:12px;margin-bottom:6px}
-.sw-lacquer{background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,0) 45%),radial-gradient(120% 90% at 30% 0%,rgba(255,255,255,.10),rgba(255,255,255,0) 60%),var(--lac,#241C2E);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -10px 16px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.1)}
-.sw-selenite{background:linear-gradient(115deg,rgba(255,255,255,.05) 0 18%,rgba(255,255,255,.22) 22%,rgba(255,255,255,.04) 30% 62%,rgba(255,255,255,.18) 66%,rgba(255,255,255,.03) 72%),linear-gradient(160deg,#3A3F5C,#1B1A2A);box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
-.mat .n,.fin .n{font-size:var(--fs-md);font-weight:700;line-height:21px}
-.mat .d,.fin .d{font-size:var(--fs-xs);line-height:17px;color:var(--ink-4)}
+.fin .n{font-size:var(--fs-md);font-weight:700;line-height:21px}
+.fin .d{font-size:var(--fs-xs);line-height:17px;color:var(--ink-4)}
 .photo-grid2{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .photo .img,.photo-add2 .img{display:block;width:100%;aspect-ratio:3/2;border-radius:14px;object-fit:cover;background:#0A0A0F;box-sizing:border-box}
 .photo .plain{display:grid;place-items:center;color:var(--ink-4);font-size:var(--fs-sm)}
@@ -768,97 +763,4 @@ html[data-view="settings"] .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),.3))}
   .fin-grid{gap:8px}
   .fin .d{display:none}
   .readnote{flex-wrap:wrap}
-}
-
-/* ------------------------------------------------------------- selenite */
-/* While selenite is up (html.sel: your material is selenite), the page's panes become crystal
-   plates. js/selenite/plates.js lays each plate in #plates, under the app and over the photo, at
-   its host's box; overlays and the agent carry their own (theme.js lists which stand on which). */
-#plates{position:fixed;inset:0;z-index:1;pointer-events:none}
-.plate{position:absolute;pointer-events:none}
-.plate .gl{inset:0}
-.plate.pending .under,.plate.pending .light,.plate.pending .zone,.plate.pending .spec{display:none}
-.plate.pending .fx{-webkit-backdrop-filter:blur(12px) saturate(1.1) brightness(1.05);backdrop-filter:blur(12px) saturate(1.1) brightness(1.05)}
-/* a control the crystal cuts: masked to the plate's clear zone, a faint ring along the cut */
-.sel .cut{position:relative;-webkit-mask:var(--cut-clear) var(--cut-pos)/var(--cut-size) no-repeat;mask:var(--cut-clear) var(--cut-pos)/var(--cut-size) no-repeat;mask-clip:no-clip}
-.sel .cut::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:rgba(255,255,255,.26);-webkit-mask:var(--cut-edge) var(--cut-pos)/var(--cut-size) no-repeat;mask:var(--cut-edge) var(--cut-pos)/var(--cut-size) no-repeat}
-html.sel .bg-dim{background:rgba(4,4,8,max(var(--dim,.3),var(--dim-floor,.3)))}
-.bg .tubes{position:absolute;inset:0;width:100%;height:100%;display:none}
-.sel:not(.has-photo) .bg .tubes{display:block}
-/* the headers' captions sit on the plates' frost: one step brighter than meta elsewhere */
-.sel .page-head .meta,.sel .chat-head .meta,.sel .more .s{color:var(--ink-3)}
-/* the composer's hint sits on bare crystal, often over a neon tube */
-.sel .composer .hint{color:var(--ink-2)}
-/* text on crystal gets the boards' soft shadow */
-.sel .app,.sel .agent-panel,.sel dialog.on-plate{text-shadow:0 1px 2px rgba(0,0,0,.6),0 0 10px rgba(0,0,0,.35)}
-/* the panes give way to their plates */
-.sel .side,.sel .view-page,.sel .page-head,.sel .chat-head,.sel .composer-wrap,.sel .col,.sel .blocks-pane,.sel .preview-pane,.sel .agent-panel{background:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;border:0;box-shadow:none}
-.sel .set-nav{border:0}
-/* the small menus are frosted panels over the plates */
-.sel dialog.pick-menu:not(.on-plate),.sel dialog.menu:not(.on-plate),.sel dialog.glass:not(.on-plate){background:rgba(12,10,20,.94)!important;-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 22px 50px rgba(0,0,0,.75)}
-/* overlays on their own plate: the plate is the surface */
-.sel dialog.on-plate{background:transparent!important;box-shadow:none;overflow:visible;border:0}
-/* a scene sheet on its plate can be taller than the screen: its contents scroll, the plate stays put */
-.sel dialog.scene-menu.on-plate .sc-body{max-height:calc(min(80dvh,600px) - 60px);overflow:auto;overscroll-behavior:contain}
-.sel .plate-host>:not(.plate){position:relative;z-index:3}
-.sel dialog.on-plate .lifted,.sel dialog.msg-menu.on-plate [role=menu]{background:none;box-shadow:none}
-.sel dialog.mpick{padding:22px 24px 26px}
-/* Look, in selenite */
-.lk-preview svg.pv-img{display:block}
-.lk-preview .pv-story.on-crystal{background:rgba(10,8,18,.42);-webkit-backdrop-filter:blur(1.5px) saturate(1.1);backdrop-filter:blur(1.5px) saturate(1.1);box-shadow:inset 1px 0 0 rgba(255,255,255,.28),inset 0 1px 0 rgba(255,255,255,.18)}
-.sel .lk-preview .pv-col{background:rgba(10,8,18,.34)!important;-webkit-backdrop-filter:blur(1.5px)!important;backdrop-filter:blur(1.5px)!important}
-.photo .tubes-img{position:relative;overflow:hidden;background:#060609}
-.photo .tubes-img svg{position:absolute;inset:0;width:100%;height:100%}
-@media (min-width:900px){
-  /* the selenite boards' spacing: plates 12 px from the window, 28 px after the sidebar, 20 px apart.
-     Each scroll area sits inside its plate's clear zone; the plate reaches past it (theme.js `grow`),
-     so the margins here are those reaches. */
-  .sel .app{padding:12px;box-sizing:border-box;gap:28px}
-  .sel .side{flex-basis:256px;padding:22px 26px 30px 20px}
-  .sel .page-head,.sel .chat-head{height:72px;box-sizing:border-box;padding:0 22px;flex-wrap:nowrap}
-  .sel .set-cols,.sel .cards-cols,.sel .prompts-cols{margin-top:20px;padding-top:0;gap:20px}
-  /* chat: header and composer plates around the story, which stands on the dimmed photo (no
-     reading column on a wide screen; theme.js hasWindow) */
-  .sel .view-chat{background:none!important;position:relative}
-  /* the board's fixed dark backdrop behind the story, between the header and composer plates */
-  .sel .view-chat::before{content:"";position:absolute;left:4px;right:4px;top:86px;bottom:134px;background:rgba(5,5,8,.9);border-radius:40px;filter:blur(22px);pointer-events:none}
-  .sel .msgs-scroll{position:relative}
-  /* the header plate keeps one row: the cast scrolls sideways when the agent narrows it */
-  .sel .chat-head .chat-title{flex:none}
-  .sel .chat-head .cast-chips{flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
-  .sel .chat-head{margin-bottom:6px}
-  .sel .msgs-scroll{padding-top:22px}
-  .sel .composer-wrap{padding:0;margin-top:6px}
-  .sel .composer{background:none;box-shadow:none;min-height:120px;box-sizing:border-box;padding:18px 22px 10px 30px;display:flex;flex-direction:column;justify-content:space-between}
-  /* settings */
-  .sel .set-nav{flex:0 0 230px;margin:32px 22px 50px 20px;padding:0 4px 12px 0}
-  .sel .set-main{margin:24px 28px 54px 46px;padding:8px 10px 40px}
-  /* cards: library | editor | where it's used */
-  .sel .library{flex-basis:274px;margin:12px 10px 48px;padding:0 4px 12px 0}
-  .sel .editor{margin:22px 26px 44px 16px;padding:0 6px 24px 0}
-  .sel .rail{flex-basis:228px;margin:16px 16px 44px 22px;padding:0 4px 12px 0;border:0}
-  /* prompts: blocks | preview */
-  .sel .blocks-pane{margin:22px 36px 56px 20px;padding:0 6px 24px 0}
-  .sel .preview-pane{flex-basis:414px;margin:20px 14px 42px 24px;border:0}
-  /* the agent: a plate at the window's right edge */
-  .sel .agent-panel{inset:12px 12px 12px auto;width:378px;padding:22px 22px 24px;border:0}
-  /* while it's open the page makes room for it, as on the chat board */
-  .sel:has(#agent-panel:not([hidden])) .app{padding-right:418px}
-  .sel dialog.dlg.on-plate{padding:24px 26px}
-}
-@media (max-width:899px){
-  /* phone: the chat has a header plate and a composer plate; every other page is one plate with
-     the header inside it */
-  .sel .chat-head{margin:max(6px,env(safe-area-inset-top)) 8px 0;padding:8px 10px}
-  .sel .composer-wrap{margin:0 8px max(6px,env(safe-area-inset-bottom));padding:14px 12px 10px}
-  .sel .composer{background:none;box-shadow:none}
-  .sel .view-page{margin:max(6px,env(safe-area-inset-top)) 6px max(6px,env(safe-area-inset-bottom))}
-  .sel .view-page .page-head{padding:14px 16px 6px 12px}
-  .sel .set-cols{margin:0 0 24px}
-  .sel .cards-cols,.sel .prompts-cols{margin:0 0 20px;padding:0 6px}
-  .sel .set-nav,.sel .set-main{padding:10px 30px 32px 14px}
-  .sel .agent-panel{inset:max(6px,env(safe-area-inset-top)) 6px max(6px,env(safe-area-inset-bottom));width:auto;padding:18px 16px}
-  .sel dialog.mpick{padding:50px 18px max(18px,env(safe-area-inset-bottom))!important}
-  /* sheets on their plate: content starts below the plate's frosted top edge, as on the boards */
-  .sel dialog.on-plate.sheet-on-phone:not(.mpick){padding:44px 14px max(16px,env(safe-area-inset-bottom))!important}
 }
