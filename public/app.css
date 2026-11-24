@@ -595,6 +595,8 @@ dialog.mpick[open]{display:flex}
 .agent-ask{border-left:3px solid var(--violet);padding:4px 0 4px 10px;margin:10px 0}
 .agent-options{display:grid;gap:6px}.agent-option{display:flex;flex-direction:column;text-align:left}
 .agent-error{padding:8px;color:var(--danger-ink)}
+.agent-live{margin:10px 0}.agent-live .agent-msg{margin-top:4px}.agent-live .thinking{margin:2px 0 6px}
+.agent-live-status{font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;font-weight:700}
 @media(max-width:899px){.agent-panel{width:100vw;padding:12px}}
 .agent-edit-head button{white-space:nowrap;flex-shrink:0}
 

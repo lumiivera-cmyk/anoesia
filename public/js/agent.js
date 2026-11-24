@@ -12,7 +12,8 @@
  */
 
 import { $, api, attempt, escapeHtml, formatText, loadState, sendsOnEnter, state } from "./core.js";
-import { openChat, renderChat as renderRoleplay } from "./chat.js";
+import { openChat, readEvents, renderChat as renderRoleplay } from "./chat.js";
+import { icon } from "./icons.js";
 import { reloadPrompts } from "./prompts.js";
 import { renderSide } from "./side.js";
 
@@ -25,6 +26,10 @@ const agent = {
   sessionId: null,
   view: null,
   busy: false,
+  /** The reply being written right now ({ reasoning, content }), while a turn runs. */
+  live: null,
+  /** Stop was pressed and the turn hasn't ended yet. */
+  stopping: false,
   files: [],
   filePath: null,
   edits: [],
@@ -98,7 +103,12 @@ async function openSession(id) {
     remember("anoesia.agentSessions", lastSessions);
   }
   agent.view = id ? await attempt(() => api("GET", `/api/agent/sessions/${id}`)) : null;
+  if (agent.sessionId !== id) return;
+  agent.busy = Boolean(agent.view?.busy);
+  agent.live = agent.busy ? { reasoning: "", content: "" } : null;
   renderAll();
+  // A turn still running (the page was reloaded, the phone slept): watch it.
+  if (agent.busy) follow(id, (signal) => fetch(`api/agent/sessions/${id}/live`, { signal }));
 }
 
 async function newSession() {
@@ -200,7 +210,9 @@ function renderChat() {
   const log = $("agent-log");
   const view = agent.view;
   $("agent-stop").hidden = !agent.busy;
-  $("agent-send").disabled = agent.busy;
+  $("agent-stop").disabled = agent.stopping;
+  $("agent-stop").textContent = agent.stopping ? "Stopping…" : "Stop";
+  $("agent-send").hidden = agent.busy;
   if (!view && agent.mode === "chat") {
     const name = escapeHtml(state.chat?.name ?? "this chat");
     log.innerHTML = `<div class="agent-empty muted small">
@@ -267,9 +279,65 @@ function renderChat() {
       }</div>${edits.map(editHtml).join("")}</div>`);
     }
   }
-  if (agent.busy) html.push(`<div class="agent-msg assistant muted">Working…</div>`);
+  if (agent.busy) html.push(liveHtml());
+  const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   log.innerHTML = html.join("");
-  log.scrollTop = log.scrollHeight;
+  if (agent.busy) drawLive();
+  if (atEnd || !agent.busy) log.scrollTop = log.scrollHeight;
+}
+
+// ------------------------------------------------------------ the live reply
+
+/** The agent's reply as it's written: its thinking in a fold, then the text with a caret. */
+function liveHtml() {
+  return `<div class="agent-live" aria-busy="true">
+    <div class="agent-live-status muted small" role="status" data-live-status></div>
+    <details class="thinking" data-live-thinking hidden${foldOpen ? " open" : ""}><summary>${icon.right(14)}<span data-live-thinking-label>thinking</span></summary><div class="thinking-body" data-live-reasoning></div></details>
+    <div class="agent-msg assistant" data-live-text hidden></div>
+  </div>`;
+}
+
+/** Whether you've opened or closed the live fold yourself, and whether it's open. */
+let foldTouched = false;
+let foldOpen = true;
+let drawQueued = false;
+
+function queueLive() {
+  if (drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(() => {
+    drawQueued = false;
+    const log = $("agent-log");
+    const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    drawLive();
+    if (atEnd) log.scrollTop = log.scrollHeight;
+  });
+}
+
+function drawLive() {
+  const box = $("agent-log");
+  const fold = box.querySelector("[data-live-thinking]");
+  if (!fold) return;
+  const live = agent.live ?? { reasoning: "", content: "" };
+  const caret = `<span class="caret" aria-hidden="true">▍</span>`;
+  const status = agent.stopping ? "stopping" : live.content ? "writing" : live.reasoning ? "thinking" : "working";
+  box.querySelector("[data-live-status]").innerHTML = `${status}${live.content ? "" : caret}`;
+  fold.hidden = !live.reasoning;
+  if (live.reasoning) {
+    box.querySelector("[data-live-thinking-label]").textContent = live.content ? "reasoning" : "thinking";
+    const body = box.querySelector("[data-live-reasoning]");
+    const following = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    body.innerHTML = formatText(live.reasoning);
+    if (following) body.scrollTop = body.scrollHeight;
+    if (live.content && fold.open && !foldTouched) fold.open = false;
+  }
+  const text = box.querySelector("[data-live-text]");
+  text.hidden = !live.content;
+  if (live.content) {
+    const html = formatText(live.content);
+    const end = html.lastIndexOf("</p>");
+    text.innerHTML = end >= 0 ? `${html.slice(0, end)}${caret}${html.slice(end)}` : html + caret;
+  }
 }
 
 async function renderChanges() {
@@ -316,25 +384,109 @@ async function send(text) {
   }
   const id = agent.sessionId;
   agent.busy = true;
+  agent.live = { reasoning: "", content: "" };
+  foldTouched = false;
+  foldOpen = true;
+  showError(null);
   // Show your message right away.
   agent.view.messages.push({ id: "pending", turnId: "pending", role: "user", content: text });
   $("agent-input").value = "";
   renderChat();
-  let view;
-  try {
-    view = await api("POST", `/api/agent/sessions/${id}/send`, { content: text, chatId: state.chatId });
-  } catch (error) {
-    view = await api("GET", `/api/agent/sessions/${id}`).catch(() => agent.view);
-    view.error = error.message;
-    if (!view.messages.some((m) => m.role === "user" && m.content === text)) $("agent-input").value = text;
+  const sent = await follow(id, (signal) =>
+    fetch(`api/agent/sessions/${id}/send?stream=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text, chatId: state.chatId }), signal }),
+  );
+  // Refused before it started (no profile yet, say): your words go back in the box.
+  if (sent === "refused" && !$("agent-input").value) $("agent-input").value = text;
+}
+
+function showError(message) {
+  $("agent-error").textContent = message ?? "";
+  $("agent-error").hidden = !message;
+}
+
+/** Which turn this panel is watching (one at a time), so a stream from a session you've left is let go. */
+let watching = null;
+
+/**
+ * Follow a turn's events (see the server's `watch`) until it's done. If the
+ * connection drops first (the phone slept, the network blinked) and the turn
+ * is still running, watch it again from where it is. Returns "done",
+ * "refused" (it never started: the reason is shown) or "lost".
+ */
+async function follow(id, open) {
+  watching?.abort();
+  const me = new AbortController();
+  watching = me;
+  const mine = () => watching === me && agent.sessionId === id;
+  const editsAtStart = agent.view?.edits?.length ?? 0;
+  let editsSeen = editsAtStart;
+  let result = "lost";
+  for (let tries = 0; result === "lost" && tries < 6 && mine(); tries++) {
+    if (tries) await new Promise((r) => setTimeout(r, Math.min(500 * 2 ** tries, 8000)));
+    if (!mine()) break;
+    let response;
+    try {
+      response = await (tries === 0 ? open(me.signal) : fetch(`api/agent/sessions/${id}/live`, { signal: me.signal }));
+    } catch {
+      continue;
+    }
+    if (!(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const data = await response.json().catch(() => null);
+      if (response.status === 401 && data?.login) location.href = "login";
+      if (mine()) showError(data?.error ?? `The server answered ${response.status}.`);
+      result = "refused";
+      break;
+    }
+    try {
+      const done = await readEvents(response, (event) => {
+        if (!mine()) return;
+        if (event.type === "start" || event.type === "saved") {
+          const { type, live, ...view } = event;
+          agent.view = view;
+          agent.live = live ?? { reasoning: "", content: "" };
+          renderChat();
+          // The agent changed something: show it in the app as it happens.
+          if ((view.edits?.length ?? 0) !== editsSeen) {
+            editsSeen = view.edits?.length ?? 0;
+            refreshApp();
+          }
+        } else if (event.type === "more") {
+          agent.live ??= { reasoning: "", content: "" };
+          agent.live.reasoning += event.reasoning ?? "";
+          agent.live.content += event.content ?? "";
+          queueLive();
+        } else if (event.type === "reply") {
+          agent.live = { reasoning: event.reasoning ?? "", content: event.content ?? "" };
+          queueLive();
+        } else if (event.type === "done") {
+          const { type, error, ...view } = event;
+          agent.view = view;
+          if (error && !/stopped/i.test(error)) showError(error);
+          if ((view.edits?.length ?? 0) !== editsSeen) refreshApp();
+        }
+      });
+      if (done) result = "done";
+    } catch {
+      // dropped: try again
+    }
   }
-  agent.busy = false;
-  if (agent.sessionId === id) agent.view = view;
-  await refreshList();
-  renderAll();
-  $("agent-error").textContent = view.error ?? "";
-  $("agent-error").hidden = !view.error;
-  if (view.edits?.length) await refreshApp();
+  if (watching === me) watching = null;
+  if (agent.sessionId === id) {
+    agent.busy = false;
+    agent.stopping = false;
+    agent.live = null;
+    if (result !== "done") agent.view = (await api("GET", `/api/agent/sessions/${id}`).catch(() => null)) ?? agent.view;
+    await refreshList();
+    renderAll();
+  }
+  return result;
+}
+
+async function stop() {
+  if (!agent.sessionId || !agent.busy || agent.stopping) return;
+  agent.stopping = true;
+  renderChat();
+  await api("POST", `/api/agent/sessions/${agent.sessionId}/stop`).catch(() => {});
 }
 
 /** The agent may have changed cards, prompts or messages: show them as they are now. */
@@ -410,7 +562,14 @@ export function wireAgent() {
       send($("agent-input").value);
     }
   });
-  $("agent-stop").addEventListener("click", () => agent.sessionId && api("POST", `/api/agent/sessions/${agent.sessionId}/stop`).catch(() => {}));
+  $("agent-stop").addEventListener("click", stop);
+  // Opening or closing the live thinking yourself keeps it as you left it.
+  $("agent-log").addEventListener("click", (e) => {
+    if (e.target.closest("[data-live-thinking] summary")) {
+      foldTouched = true;
+      foldOpen = !e.target.closest("details").open;
+    }
+  });
 
   $("agent-panel").addEventListener("click", async (e) => {
     const t = e.target.closest("button");

@@ -11,7 +11,7 @@
 import { TOOL_SPECS, runTool } from "./agenttools.ts";
 import type { AgentStore } from "./agentstore.ts";
 import { ValidationError, newId } from "./errors.ts";
-import { ApiError, createChatCompletion, type ApiOptions } from "./nanogpt.ts";
+import { ApiError, CancelledError, streamChatCompletion, type ApiOptions, type LiveReply } from "./nanogpt.ts";
 import type { Store } from "./store.ts";
 import type { AgentApiMessage, AgentEdit, AgentMessage, AgentSession, ApiToolCall } from "./types.ts";
 import type { Workspace } from "./workspace.ts";
@@ -24,6 +24,8 @@ const OLD_RESULT_CHARS = 1500;
 export interface TurnResult {
   messages: AgentMessage[];
   edits: AgentEdit[];
+  /** Stopped with the Stop button before it finished. */
+  stopped?: boolean;
 }
 
 /** The agent's standing instructions, with its files and a map of what's there now. */
@@ -97,11 +99,27 @@ export interface TurnInput {
   signal?: AbortSignal;
 }
 
+/** What a turn tells its watchers as it goes. */
+export interface TurnHooks {
+  /** The reply being written this round, so far (its reasoning and its text). */
+  onUpdate?: (live: LiveReply) => void;
+  /** A message was saved (a reply, a tool call, a tool's result). */
+  onSaved?: () => void;
+}
+
+/** A turn that has been checked and has your message saved, ready to run. */
+export interface PreparedTurn {
+  sessionId: string;
+  turnId: string;
+  run: (hooks?: TurnHooks) => Promise<TurnResult>;
+}
+
 /**
- * One turn: your message, then the agent's tool calls and reply. Everything
- * is saved as it happens, so a failure partway keeps what was done.
+ * Check a turn can start and save your message (throws `ValidationError`
+ * when it can't), then hand back `run`, which does the rest. Split so the
+ * server can answer "can't" at once and run the turn in the background.
  */
-export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Workspace; api: ApiOptions }, input: TurnInput): Promise<TurnResult> {
+export function prepareTurn(deps: { store: Store; agent: AgentStore; ws: Workspace; api: ApiOptions }, input: TurnInput): PreparedTurn {
   const { store, agent, ws, api } = deps;
   const settings = store.settings();
   if (!settings.agentProfileId) throw new ValidationError("Pick a profile for the agent first (Settings → Connections).");
@@ -118,55 +136,85 @@ export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Works
   added.push(agent.addMessage({ sessionId: session.id, turnId, role: "user", content: text }));
   if (session.title === "New session") agent.updateSession(session.id, { title: text.replace(/\s+/g, " ").slice(0, 60) });
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    const last = round === MAX_ROUNDS - 1;
-    const conversation: AgentApiMessage[] = [
-      { role: "system", content: systemPrompt(store, agent, ws, session.chatId, session.scope) },
-      ...toApiMessages(agent.messages(session.id), turnId),
-    ];
-    const result = await createChatCompletion(api, {
-      model: profile.model,
-      provider: profile.provider,
-      messages: conversation,
-      temperature: profile.temperature,
-      maxTokens: profile.maxTokens,
-      topP: profile.topP,
-      minP: profile.minP,
-      reasoningEffort: profile.reasoningEffort,
-      extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Record<string, unknown>) : undefined,
-      tools: TOOL_SPECS,
-      toolChoice: last ? "none" : "auto",
-      allowEmpty: round > 0,
-      signal: input.signal,
-    });
+  const run = async (hooks: TurnHooks = {}): Promise<TurnResult> => {
+    const save = (m: Parameters<AgentStore["addMessage"]>[0]) => {
+      added.push(agent.addMessage(m));
+      hooks.onSaved?.();
+    };
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (input.signal?.aborted) return { messages: added, edits, stopped: true };
+      const last = round === MAX_ROUNDS - 1;
+      const conversation: AgentApiMessage[] = [
+        { role: "system", content: systemPrompt(store, agent, ws, session.chatId, session.scope) },
+        ...toApiMessages(agent.messages(session.id), turnId),
+      ];
+      hooks.onUpdate?.({ reasoning: "", content: "" });
+      let result;
+      try {
+        result = await streamChatCompletion(
+          api,
+          {
+            model: profile.model,
+            provider: profile.provider,
+            messages: conversation,
+            temperature: profile.temperature,
+            maxTokens: profile.maxTokens,
+            topP: profile.topP,
+            minP: profile.minP,
+            reasoningEffort: profile.reasoningEffort,
+            extraParams: profile.extraParams ? (JSON.parse(profile.extraParams) as Record<string, unknown>) : undefined,
+            tools: TOOL_SPECS,
+            toolChoice: last ? "none" : "auto",
+            allowEmpty: round > 0,
+            signal: input.signal,
+          },
+          (live) => hooks.onUpdate?.(live),
+        );
+      } catch (error) {
+        // Stopped: keep the words that had arrived, like a reply that ended there.
+        if (!(error instanceof CancelledError)) throw error;
+        const partial = error.partial.content.trim();
+        if (partial) save({ sessionId: session.id, turnId, role: "assistant", content: partial });
+        return { messages: added, edits, stopped: true };
+      }
 
-    const calls = last ? [] : result.toolCalls;
-    if (calls.length === 0) {
-      const content = result.content.trim() || (round > 0 ? "(Done.)" : "");
-      if (!content) throw new ApiError("The model returned an empty reply.");
-      added.push(agent.addMessage({ sessionId: session.id, turnId, role: "assistant", content }));
-      return { messages: added, edits };
+      const calls = last ? [] : result.toolCalls;
+      if (calls.length === 0) {
+        const content = result.content.trim() || (round > 0 ? "(Done.)" : "");
+        if (!content) throw new ApiError("The model returned an empty reply.");
+        save({ sessionId: session.id, turnId, role: "assistant", content });
+        return { messages: added, edits };
+      }
+
+      const apiCalls: ApiToolCall[] = calls.map((c) => ({
+        id: c.id,
+        type: "function",
+        function: { name: c.name, arguments: c.arguments },
+        ...(c.extraContent ? { extra_content: c.extraContent } : {}),
+      }));
+      save({ sessionId: session.id, turnId, role: "assistant", content: result.content, toolCalls: apiCalls });
+
+      let stop = false;
+      for (const call of calls) {
+        // After a question, the rest wait for the answer.
+        const outcome = stop
+          ? { text: "Not run: you asked the person a question first. Wait for their answer." }
+          : runTool(call.name, call.arguments, { ws, ctx: { sessionId: session.id, turnId }, chatId: session.chatId, scope: session.scope });
+        if (outcome.edits) edits.push(...outcome.edits);
+        if ("stop" in outcome && outcome.stop) stop = true;
+        save({ sessionId: session.id, turnId, role: "tool", content: outcome.text, toolCallId: call.id, toolName: call.name });
+      }
+      if (stop) return { messages: added, edits };
     }
+    return { messages: added, edits };
+  };
+  return { sessionId: session.id, turnId, run };
+}
 
-    const apiCalls: ApiToolCall[] = calls.map((c) => ({
-      id: c.id,
-      type: "function",
-      function: { name: c.name, arguments: c.arguments },
-      ...(c.extraContent ? { extra_content: c.extraContent } : {}),
-    }));
-    added.push(agent.addMessage({ sessionId: session.id, turnId, role: "assistant", content: result.content, toolCalls: apiCalls }));
-
-    let stop = false;
-    for (const call of calls) {
-      // After a question, the rest wait for the answer.
-      const outcome = stop
-        ? { text: "Not run: you asked the person a question first. Wait for their answer." }
-        : runTool(call.name, call.arguments, { ws, ctx: { sessionId: session.id, turnId }, chatId: session.chatId, scope: session.scope });
-      if (outcome.edits) edits.push(...outcome.edits);
-      if ("stop" in outcome && outcome.stop) stop = true;
-      added.push(agent.addMessage({ sessionId: session.id, turnId, role: "tool", content: outcome.text, toolCallId: call.id, toolName: call.name }));
-    }
-    if (stop) return { messages: added, edits };
-  }
-  return { messages: added, edits };
+/**
+ * One turn: your message, then the agent's tool calls and reply. Everything
+ * is saved as it happens, so a failure or a stop partway keeps what was done.
+ */
+export async function runTurn(deps: { store: Store; agent: AgentStore; ws: Workspace; api: ApiOptions }, input: TurnInput, hooks?: TurnHooks): Promise<TurnResult> {
+  return prepareTurn(deps, input).run(hooks);
 }
