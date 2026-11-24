@@ -346,7 +346,7 @@ export async function streamChatCompletion(
       return result;
     }
 
-    const acc: StreamAcc = { raw: "", fieldReasoning: "", detailsReasoning: "", model: "", finishReason: null, fields: new Set<string>() };
+    const acc: StreamAcc = { raw: "", fieldReasoning: "", detailsReasoning: "", model: "", finishReason: null, fields: new Set<string>(), calls: [] };
     const live = (): LiveReply => liveReply(acc.raw, acc.fieldReasoning, acc.detailsReasoning, request.reasoningEchoes);
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
@@ -381,7 +381,8 @@ export async function streamChatCompletion(
     const final = live();
     const field = acc.fieldReasoning.trim();
     const reasoningEchoed = field ? echoes(field, final.content) || echoes(field, acc.raw.trim()) || (!final.content && Boolean(request.reasoningEchoes)) : undefined;
-    if (!final.content && !request.allowEmpty) {
+    const toolCalls = streamedToolCalls(acc);
+    if (!final.content && toolCalls.length === 0 && !request.allowEmpty) {
       throw new ApiError(
         acc.finishReason === "length"
           ? "The model ran out of tokens before writing anything. Try raising Max tokens."
@@ -395,7 +396,7 @@ export async function streamChatCompletion(
     console.log(
       `${providerName(target)} reply: ${acc.model || request.model}${asked}; ${final.reasoning.length} characters of reasoning, ${final.content.length} of text${echoed ? " (a reasoning field only repeated the text, so it was dropped)" : ""}; fields seen: ${[...acc.fields].join(", ") || "none"}${refusals.length ? `; Google said: ${refusals.join(" | ")}` : ""}`,
     );
-    return { content: final.content, toolCalls: [], model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning, ...(reasoningEchoed === undefined ? {} : { reasoningEchoed }) };
+    return { content: final.content, toolCalls, model: acc.model || request.model, finishReason: acc.finishReason, reasoning: final.reasoning, ...(reasoningEchoed === undefined ? {} : { reasoningEchoed }) };
   } catch (error) {
     throw fail(error);
   } finally {
@@ -446,6 +447,15 @@ interface StreamAcc {
   finishReason: string | null;
   /** The delta fields seen, for the log. */
   fields: Set<string>;
+  /** Tool calls as they arrive, in pieces, by their index. */
+  calls: { id: string; name: string; arguments: string; extraContent?: Record<string, unknown> }[];
+}
+
+/** The tool calls a streamed reply asked for, whole. */
+function streamedToolCalls(acc: StreamAcc): NativeToolCall[] {
+  return acc.calls.flatMap((c, index) =>
+    c && c.name ? [{ id: c.id || `call_${index}`, name: c.name, arguments: c.arguments || "{}", ...(c.extraContent ? { extraContent: c.extraContent } : {}) }] : [],
+  );
 }
 
 function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
@@ -463,7 +473,7 @@ function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
   }
   if (typeof json.model === "string" && json.model) acc.model = json.model;
   const choice = (Array.isArray(json.choices) ? json.choices[0] : undefined) as
-    | { delta?: { content?: unknown; extra_content?: { google?: { thought?: unknown } } } & ReasoningFields; finish_reason?: unknown }
+    | { delta?: { content?: unknown; tool_calls?: unknown; extra_content?: { google?: { thought?: unknown } } } & ReasoningFields; finish_reason?: unknown }
     | undefined;
   if (typeof choice?.finish_reason === "string") acc.finishReason = choice.finish_reason;
   const delta = choice?.delta;
@@ -487,7 +497,23 @@ function readChunk(data: string, acc: StreamAcc, target: ApiOptions): boolean {
     if (thought) acc.fieldReasoning += delta.content;
     else acc.raw += delta.content;
   }
-  return size() !== before;
+  // Tool calls come in pieces: the id and name first, then the arguments a bit at a time, matched by index.
+  let called = false;
+  if (Array.isArray(delta.tool_calls)) {
+    for (const [i, raw] of delta.tool_calls.entries()) {
+      if (!isRecord(raw)) continue;
+      const index = typeof raw.index === "number" ? raw.index : i;
+      const call = (acc.calls[index] ??= { id: "", name: "", arguments: "" });
+      if (typeof raw.id === "string" && raw.id) call.id = raw.id;
+      const fn = isRecord(raw.function) ? raw.function : {};
+      if (typeof fn.name === "string" && fn.name) call.name = fn.name.startsWith(call.name) ? fn.name : call.name + fn.name; // whole each time, or in pieces
+      if (typeof fn.arguments === "string") call.arguments += fn.arguments;
+      else if (isRecord(fn.arguments)) call.arguments = JSON.stringify(fn.arguments);
+      if (isRecord(raw.extra_content)) call.extraContent = raw.extra_content;
+      called = true;
+    }
+  }
+  return size() !== before || called;
 }
 
 /**

@@ -14,7 +14,7 @@ import { ApiError, CancelledError, createChatCompletion, listModels, streamChatC
 import { KNOWN_MACROS } from "./macros.ts";
 import { assemblePrompt, cleanReply } from "./prompt.ts";
 import { NUDGES } from "./nudges.ts";
-import { runTurn } from "./agent.ts";
+import { prepareTurn } from "./agent.ts";
 import { AgentStore } from "./agentstore.ts";
 import { compactDiff, diff } from "./diff.ts";
 import { ConflictError, Workspace } from "./workspace.ts";
@@ -37,7 +37,8 @@ export function createApp(config: Config): App {
   const store = new Store(db);
   const agent = new AgentStore(db);
   const ws = new Workspace(store, agent);
-  const agentRunning = new Map<string, AbortController>();
+  /** The agent turn being run in each session, so Stop can end it and the panel can watch it (see `startTurn`). */
+  const agentRunning = new Map<string, Live>();
   const login = new Login(config.dataDir);
   const photoDir = join(config.dataDir, "photos");
   mkdirSync(photoDir, { recursive: true });
@@ -101,6 +102,41 @@ export function createApp(config: Config): App {
         running.delete(chatId);
       }
       tell(live, { type: "done", ...chatView(chatId), ...outcome });
+      return outcome;
+    })();
+    return live;
+  }
+
+  /**
+   * Start an agent turn in a session: checks it can start and saves your
+   * message (throws `ValidationError` if not), then runs it in the
+   * background, telling watchers each reply as it's written ("more",
+   * "reply"), each message once it's saved ("saved", with the session), and
+   * "done" at the end. Stop keeps what was done so far.
+   */
+  function startTurn(sessionId: string, text: string, chatId: string | null): Live {
+    agent.session(sessionId);
+    if (agentRunning.has(sessionId)) throw new ValidationError("The agent is still working on your last message.");
+    const live: Live = { controller: new AbortController(), reply: { reasoning: "", content: "" }, watchers: new Set(), finished: Promise.resolve({}) };
+    const turn = prepareTurn({ store, agent, ws, api }, { sessionId, text, chatId, signal: live.controller.signal });
+    agentRunning.set(sessionId, live);
+    live.finished = (async () => {
+      let outcome: { error?: string } = {};
+      try {
+        await turn.run({
+          onUpdate: (next) => update(live, next),
+          onSaved: () => {
+            live.reply = { reasoning: "", content: "" };
+            tell(live, { type: "saved", ...sessionView(sessionId), live: live.reply });
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof ApiError || error instanceof ValidationError || error instanceof CancelledError)) console.error(error);
+        outcome = { error: errorMessage(error) };
+      } finally {
+        agentRunning.delete(sessionId);
+      }
+      tell(live, { type: "done", ...sessionView(sessionId), ...outcome });
       return outcome;
     })();
     return live;
@@ -180,7 +216,7 @@ export function createApp(config: Config): App {
    * reply saved, and `error` if it failed). With no reply being written,
    * just "done". Leaving early doesn't stop the reply; Stop does.
    */
-  function watch(chatId: string, live: Live | undefined): Response {
+  function watch(view: () => Json, live: Live | undefined): Response {
     const encoder = new TextEncoder();
     let stopWatching = () => {};
     const stream = new ReadableStream<Uint8Array>({
@@ -193,7 +229,7 @@ export function createApp(config: Config): App {
           }
         };
         if (!live) {
-          send({ type: "done", ...chatView(chatId) });
+          send({ type: "done", ...view() });
           controller.close();
           return;
         }
@@ -221,7 +257,7 @@ export function createApp(config: Config): App {
           live.watchers.delete(watcher);
         };
         live.watchers.add(watcher);
-        send({ type: "start", ...chatView(chatId), live: live.reply });
+        send({ type: "start", ...view(), live: live.reply });
       },
       cancel() {
         stopWatching();
@@ -266,7 +302,7 @@ export function createApp(config: Config): App {
   }
 
   function sessionView(id: string) {
-    return { session: agent.session(id), messages: agent.messages(id), edits: agent.edits({ sessionId: id }).map(editView), busy: agentRunning.has(id) };
+    return { session: agent.session(id), messages: agent.messages(id), edits: agent.edits({ sessionId: id }).map(editView), busy: agentRunning.has(id) } as Json;
   }
 
   function filesView() {
@@ -407,18 +443,19 @@ export function createApp(config: Config): App {
       const chatId = p[0]!;
       const b = await body();
       const live = startReply(chatId, { regenerate: false, text: typeof b.content === "string" ? b.content.trim() : "" });
-      return url.searchParams.get("stream") === "1" ? watch(chatId, live) : settled(chatId, live);
+      return url.searchParams.get("stream") === "1" ? watch(() => chatView(chatId), live) : settled(chatId, live);
     }
     // Regenerate: a new version of the last reply, written from everything before it.
     if ((p = m("/api/chats/:id/regenerate")) && method === "POST") {
       const chatId = p[0]!;
       const live = startReply(chatId, { regenerate: true });
-      return url.searchParams.get("stream") === "1" ? watch(chatId, live) : settled(chatId, live);
+      return url.searchParams.get("stream") === "1" ? watch(() => chatView(chatId), live) : settled(chatId, live);
     }
     // Watch the reply being written (after the page was reloaded, or the phone slept).
     if ((p = m("/api/chats/:id/live")) && method === "GET") {
-      store.chat(p[0]!);
-      return watch(p[0]!, running.get(p[0]!));
+      const chatId = p[0]!;
+      store.chat(chatId);
+      return watch(() => chatView(chatId), running.get(chatId));
     }
     // Branch: a new chat with this one's story up to a message (and its cast, notes and blocks).
     if ((p = m("/api/chats/:id/branch")) && method === "POST") {
@@ -454,25 +491,24 @@ export function createApp(config: Config): App {
       if (method === "PATCH") return json(agent.updateSession(p[0]!, await body()));
       if (method === "DELETE") return (agent.deleteSession(p[0]!), json({ ok: true }));
     }
+    // Send to the agent: your message is saved, then the turn runs in the background.
+    // With ?stream=1 it arrives as it's written (see `watch`); without, the answer waits for it.
     if ((p = m("/api/agent/sessions/:id/send")) && method === "POST") {
       const id = p[0]!;
       const b = await body();
+      const live = startTurn(id, typeof b.content === "string" ? b.content : "", typeof b.chatId === "string" ? b.chatId : null);
+      if (url.searchParams.get("stream") === "1") return watch(() => sessionView(id), live);
+      const outcome = await live.finished;
+      return json({ ...sessionView(id), ...outcome });
+    }
+    // Watch the turn being run (after the page was reloaded, or the phone slept).
+    if ((p = m("/api/agent/sessions/:id/live")) && method === "GET") {
+      const id = p[0]!;
       agent.session(id);
-      if (agentRunning.has(id)) throw new ValidationError("The agent is still working on your last message.");
-      const controller = new AbortController();
-      agentRunning.set(id, controller);
-      try {
-        await runTurn({ store, agent, ws, api }, { sessionId: id, text: typeof b.content === "string" ? b.content : "", chatId: typeof b.chatId === "string" ? b.chatId : null, signal: controller.signal });
-      } catch (error) {
-        if (error instanceof ValidationError && !agent.messages(id).length) throw error;
-        return json({ ...sessionView(id), busy: false, error: errorMessage(error) });
-      } finally {
-        agentRunning.delete(id);
-      }
-      return json(sessionView(id));
+      return watch(() => sessionView(id), agentRunning.get(id));
     }
     if ((p = m("/api/agent/sessions/:id/stop")) && method === "POST") {
-      agentRunning.get(p[0]!)?.abort();
+      agentRunning.get(p[0]!)?.controller.abort();
       return json({ ok: true });
     }
     if (path === "/api/agent/edits" && method === "GET") return json(agent.edits({ limit: Number(url.searchParams.get("limit")) || 200 }).map(editView));
