@@ -217,7 +217,7 @@ function drawLive() {
   }
   if (live.content) {
     const html = formatText(live.content);
-    const end = html.lastIndexOf("</p>");
+    const end = html.endsWith("</p></div>") ? html.lastIndexOf("</p>") : -1;
     box.querySelector("[data-live-text]").innerHTML = end >= 0 ? `${html.slice(0, end)}${caret}${html.slice(end)}` : html + caret;
   } else {
     box.querySelector("[data-live-text]").innerHTML = "";
