@@ -1,8 +1,10 @@
 /**
  * What every module shares: the on-screen state, talking to the server,
  * turning text into safe HTML, and the small pieces (beads, macro chips,
- * token counts) every page draws. Imports nothing but icons.
+ * token counts) every page draws. Imports nothing but icons and visuals.
  */
+
+import { sanitizeVisual, splitVisuals, visualWords } from "./visuals.js";
 
 /** What the page is showing. The server is the source of truth. */
 export const state = {
@@ -92,9 +94,17 @@ const SCENE_SHIFT = `<div class="scene-shift" role="separator" aria-label="Scene
 /**
  * Message text as safe HTML: escaped first, then paragraphs, light RP
  * formatting (`***bold italics***`, `**bold**`, `*italics*`), and a line
- * of `---` as the scene-shift mark.
+ * of `---` as the scene-shift mark. HTML blocks the model draws (see
+ * visuals.js) are drawn, cleaned, in a box of their own.
  */
 export function formatText(text) {
+  return splitVisuals(text)
+    .map((part) => (part.kind === "visual" ? `<div class="visual${part.closed ? "" : " drawing"}" role="img" aria-label="${escapeHtml(visualWords(part.text))}"><div class="visual-in">${sanitizeVisual(part.text)}</div></div>` : formatProse(part.text)))
+    .filter(Boolean)
+    .join("");
+}
+
+function formatProse(text) {
   return escapeHtml(text)
     .split(/\n[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*(?:\n|$)/)
     .map((part) => {

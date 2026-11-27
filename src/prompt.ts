@@ -34,6 +34,7 @@
  */
 
 import { fillMacros, type MacroEnv } from "./macros.ts";
+import { hasVisual, shortenVisuals } from "../public/js/visuals.js";
 import { latestUserPost } from "./nudges.ts";
 import { SUMMARY_NOTE } from "./summary.ts";
 import type { Card, ChatMessage, Message, PromptBlock } from "./types.ts";
@@ -165,9 +166,13 @@ export function assemblePrompt(input: PromptInput): AssembledPrompt {
   const items: Item[] = [];
   for (const b of input.blocks) {
     if (b.kind === "history") {
+      // Visuals (HTML a reply drew) go as their words, but for the latest one,
+      // which goes whole so the model can redraw it when asked.
+      const lastDrawn = history.findLastIndex((m) => hasVisual(m.content));
       history.forEach((m, i) => {
         items.push(...gaps[i]!);
-        items.push({ label: m.role === "user" ? userName : "Narrator", source: `message:${m.id}`, role: m.role, text: m.content });
+        const text = i === lastDrawn ? shortenVisuals(m.content, { keepLast: true }) : shortenVisuals(m.content);
+        items.push({ label: m.role === "user" ? userName : "Narrator", source: `message:${m.id}`, role: m.role, text });
       });
       items.push(...gaps[history.length]!);
       continue;
