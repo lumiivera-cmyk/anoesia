@@ -432,14 +432,23 @@ describe("cards", () => {
 describe("settings", () => {
   test("background settings are checked and kept", async () => {
     const start = (await call("GET", "/api/state")).data.settings.background;
-    expect(start).toEqual({ material: "lacquer", photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
+    expect(start).toEqual({ photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.3, window: null });
     const changed = (await call("PATCH", "/api/settings", { background: { finish: "roiro", dim: 0.1, window: 0.5 } })).data.background;
-    expect(changed).toEqual({ material: "lacquer", photo: "none", finish: "roiro", tint: 0.6, dim: 0.1, window: 0.5 });
-    expect((await call("PATCH", "/api/settings", { background: { material: "selenite" } })).data.background.material).toBe("selenite");
-    expect((await call("PATCH", "/api/settings", { background: { material: "glass" } })).status).toBe(400);
+    expect(changed).toEqual({ photo: "none", finish: "roiro", tint: 0.6, dim: 0.1, window: 0.5 });
+    // selenite is retired: a material from an old page is ignored
+    expect((await call("PATCH", "/api/settings", { background: { material: "selenite" } })).data.background).toEqual(changed);
     expect((await call("PATCH", "/api/settings", { background: { dim: 0.9 } })).status).toBe(400);
     expect((await call("PATCH", "/api/settings", { background: { photo: "moon" } })).status).toBe(404);
     expect((await call("PATCH", "/api/settings", { background: { window: null } })).data.background.window).toBeNull();
+  });
+
+  test("a background saved in selenite comes back as lacquer", async () => {
+    const save = (bg: unknown) => app.store.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('background', ?)", [JSON.stringify(bg)]);
+    save({ material: "selenite", photo: "none", finish: "shunkei", tint: 0.6, dim: 0.35, window: null });
+    expect((await call("GET", "/api/state")).data.settings.background).toEqual({ photo: "none", finish: "shunkei", tint: 0.6, dim: 0.3, window: null });
+    // a dim picked by hand is kept
+    save({ material: "selenite", photo: "none", finish: "tamenuri", tint: 0.6, dim: 0.5, window: null });
+    expect((await call("GET", "/api/state")).data.settings.background.dim).toBe(0.5);
   });
 
   test("photos are uploaded, shown, picked and deleted", async () => {

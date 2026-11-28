@@ -98,9 +98,7 @@ const LACQUER = {
     ["card delete", then(card("Ada"), tap("[data-delete-card]"))],
   ],
 };
-// Every screen twice: in lacquer, and in selenite (your material set to selenite first).
-const toSelenite = ([n, f]) => [`selenite ${n}`, then(send("PATCH", "/api/settings", { background: { material: "selenite" } }), f)];
-const SCREENS = Object.fromEntries(Object.entries(LACQUER).map(([dev, list]) => [dev, [...list, ...list.map(toSelenite)]]));
+const SCREENS = LACQUER;
 const VP = { desk: { viewport: { width: 1440, height: 900 } }, phone: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } };
 const CONTROLS = `() => {
   const top = [...document.querySelectorAll("dialog[open]")].pop();
@@ -143,8 +141,6 @@ const TEXTS = `() => { const out = [];
     p.on("console", (m) => m.type() === "error" && errs.push("console: " + m.text().slice(0, 200)));
     let setupErr = null;
     try { await setup(p); } catch (e) { setupErr = String(e).split("\n")[0]; }
-    // selenite plates paint in a worker: measure once they're up (the click test doesn't need them)
-    await p.waitForFunction(() => !document.querySelector(".plate.pending:not([hidden])"), null, { timeout: 30000 }).catch(() => errs.push("plates still painting after 30 s"));
     const r = { errors: [...errs], setupErr };
     await p.addScriptTag({ path: AXE });
     r.axe = await p.evaluate(async () => { const top = [...document.querySelectorAll("dialog[open]")].pop();
