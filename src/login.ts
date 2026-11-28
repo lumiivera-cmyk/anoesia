@@ -25,7 +25,9 @@
  * Wrong passwords are slowed down: after 8 wrong tries from one address in
  * 15 minutes, that address has to wait out the rest of the 15 minutes; and
  * after 40 from anywhere, everyone does (so a crowd of addresses can't keep
- * guessing). Setting a new password logs every device out.
+ * guessing). Setting a new password logs every device out, and so does
+ * "Log out everywhere" in Settings → Login, which also lists the devices and
+ * can log out all but the one you're on.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -57,6 +59,16 @@ interface Session {
 interface LoginFile {
   hash: string;
   sessions: Session[];
+}
+
+/** A logged-in device as Settings shows it. */
+export interface DeviceView {
+  /** "Firefox on Windows", from the browser's user agent. */
+  name: string;
+  createdAt: string;
+  lastUsedAt: string;
+  /** Whether it's the device asking. */
+  current: boolean;
 }
 
 export type LoginResult = { ok: true; token: string } | { ok: false; status: 401 | 429; error: string };
@@ -144,6 +156,30 @@ export class Login {
     this.save();
   }
 
+  /** Log out every device except the one this token belongs to. */
+  logOutOthers(token: string | null): number {
+    if (!this.data) return 0;
+    const id = token ? digest(token) : "";
+    const before = this.data.sessions.length;
+    this.data.sessions = this.data.sessions.filter((s) => id && same(s.id, id));
+    this.save();
+    return before - this.data.sessions.length;
+  }
+
+  /**
+   * The devices that are logged in, most recently used first, with which
+   * one is asking. "Last used" is only written down once a day.
+   */
+  list(token: string | null): DeviceView[] {
+    if (!this.data) return [];
+    const at = this.now();
+    const id = token ? digest(token) : "";
+    return this.data.sessions
+      .filter((s) => at - s.lastUsedAt < SESSION_MS)
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+      .map((s) => ({ name: deviceName(s.device), createdAt: new Date(s.createdAt).toISOString(), lastUsedAt: new Date(s.lastUsedAt).toISOString(), current: Boolean(id) && same(s.id, id) }));
+  }
+
   /** How many devices are logged in. */
   devices(): number {
     const at = this.now();
@@ -189,6 +225,40 @@ export class Login {
     writeFileSync(temp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
     renameSync(temp, this.path);
   }
+}
+
+/** A browser's user agent in a few words: "Firefox on Windows", "Safari on iPhone". */
+export function deviceName(ua: string): string {
+  const browser = /Edg(e|A|iOS)?\//.test(ua)
+    ? "Edge"
+    : /SamsungBrowser\//.test(ua)
+      ? "Samsung Internet"
+      : /OPR\/|Opera/.test(ua)
+        ? "Opera"
+        : /Firefox\/|FxiOS\//.test(ua)
+          ? "Firefox"
+          : /Chrome\/|CriOS\//.test(ua)
+            ? "Chrome"
+            : /Safari\//.test(ua)
+              ? "Safari"
+              : "";
+  const system = /iPhone/.test(ua)
+    ? "iPhone"
+    : /iPad/.test(ua)
+      ? "iPad"
+      : /Android/.test(ua)
+        ? "Android"
+        : /CrOS/.test(ua)
+          ? "ChromeOS"
+          : /Windows/.test(ua)
+            ? "Windows"
+            : /Mac OS X|Macintosh/.test(ua)
+              ? "Mac"
+              : /Linux/.test(ua)
+                ? "Linux"
+                : "";
+  if (browser && system) return `${browser} on ${system}`;
+  return browser || system || "Unknown browser";
 }
 
 function digest(token: string): string {

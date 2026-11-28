@@ -441,6 +441,16 @@ export function createApp(config: Config): App {
       rmSync(join(photoDir, `${p[0]}.${ext}`), { force: true });
       return json({ ok: true, settings: store.settings() });
     }
+    // Logged-in devices, for Settings → Login. Only reachable once logged in (or with no password).
+    if (path === "/api/login/devices" && method === "GET") return json({ enabled: login.enabled(), devices: login.list(tokenOf(request)) });
+    if (path === "/api/login/others" && method === "POST") {
+      const count = login.logOutOthers(tokenOf(request));
+      return json({ loggedOut: count, devices: login.list(tokenOf(request)) });
+    }
+    if (path === "/api/login/everywhere" && method === "POST") {
+      login.logOutEverywhere();
+      return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json", "Set-Cookie": cookieFor(null, overHttps(request)) } });
+    }
     if (path === "/api/settings" && method === "PATCH") return json(store.updateSettings(await body()));
 
     // Connections
