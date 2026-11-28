@@ -532,6 +532,50 @@ describe("the login", () => {
     expect((await call("GET", "/api/state", undefined, { Cookie: cookie })).status).toBe(200);
   });
 
+  test("Settings lists the devices and can log out the others, or everywhere", async () => {
+    app.close();
+    await new Login(dir).setPassword("correct horse battery");
+    start();
+    const logIn = async (ua: string) => {
+      const ok = await call("POST", "/api/login", { password: "correct horse battery" }, { "User-Agent": ua });
+      return ok.response.headers.get("set-cookie")!.split(";")[0]!;
+    };
+    const laptop = await logIn("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0");
+    const phone = await logIn("Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1");
+    const third = await logIn("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+    expect((await call("GET", "/api/login/devices")).status).toBe(401);
+    const listed = (await call("GET", "/api/login/devices", undefined, { Cookie: phone })).data;
+    expect(listed.enabled).toBe(true);
+    expect(listed.devices.map((d: { name: string }) => d.name).sort()).toEqual(["Chrome on Linux", "Firefox on Windows", "Safari on iPhone"]);
+    expect(listed.devices.filter((d: { current: boolean }) => d.current).map((d: { name: string }) => d.name)).toEqual(["Safari on iPhone"]);
+
+    const others = (await call("POST", "/api/login/others", {}, { Cookie: phone })).data;
+    expect(others.loggedOut).toBe(2);
+    expect(others.devices).toHaveLength(1);
+    expect((await call("GET", "/api/state", undefined, { Cookie: laptop })).status).toBe(401);
+    expect((await call("GET", "/api/state", undefined, { Cookie: third })).status).toBe(401);
+    expect((await call("GET", "/api/state", undefined, { Cookie: phone })).status).toBe(200);
+
+    // It sticks after a restart (it's in login.json, not only in memory).
+    app.close();
+    start();
+    expect((await call("GET", "/api/state", undefined, { Cookie: laptop })).status).toBe(401);
+    expect((await call("GET", "/api/state", undefined, { Cookie: phone })).status).toBe(200);
+
+    const laptopAgain = await logIn("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0");
+    const gone = await call("POST", "/api/login/everywhere", {}, { Cookie: phone });
+    expect(gone.status).toBe(200);
+    expect(gone.response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect((await call("GET", "/api/state", undefined, { Cookie: phone })).status).toBe(401);
+    expect((await call("GET", "/api/state", undefined, { Cookie: laptopAgain })).status).toBe(401);
+    // The password still works.
+    expect((await call("POST", "/api/login", { password: "correct horse battery" })).status).toBe(200);
+  });
+
+  test("with no password, the devices list says the login is off", async () => {
+    expect((await call("GET", "/api/login/devices")).data).toEqual({ enabled: false, devices: [] });
+  });
+
   test("hosted with no password: nobody gets in", async () => {
     app.close();
     start({ ANOESIA_HOSTED: "1" });

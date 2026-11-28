@@ -52,6 +52,7 @@ export const icon = {
   picture: (s = 20) => svg(s, '<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 15l5-4.5 4 3.5 3-2.5 5 4"/><circle cx="15.5" cy="9" r="1.6"/>', { width: 1.9 }),
   spark: (s = 20) => svg(s, '<path d="M12 3C12.9 8.1 15.9 11.1 21 12C15.9 12.9 12.9 15.9 12 21C11.1 15.9 8.1 12.9 3 12C8.1 11.1 11.1 8.1 12 3Z"/>', { width: 1.9 }),
   keyboard: (s = 20) => svg(s, '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>', { width: 1.9 }),
+  lock: (s = 20) => svg(s, '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>', { width: 1.9 }),
   reset: (s = 16) => svg(s, '<path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v4.5h4.5"/>', { width: 2 }),
   tick: (s = 14) => svg(s, '<path d="M5 12.5l4.5 4.5L19 7.5"/>', { width: 3 }),
   warn: (s = 14) => svg(s, '<path d="M12 3l10 18H2Z"/><path d="M12 10v5M12 18h.01"/>', { width: 2.2 }),
