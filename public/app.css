@@ -103,6 +103,16 @@ button.chip{border:0;font-family:inherit;color:var(--ink-1);cursor:pointer}
 .msg-body .prose{font-size:var(--fs-lg);line-height:var(--lh-prose);color:var(--ink-2)}
 .msg-body .prose p{margin:0 0 14px}
 .msg-body .prose p:last-child{margin:0}
+/* A visual the model drew (js/visuals.js): its own box, so its absolute
+   positioning and layers stay inside, and a wide one scrolls on a phone. */
+.visual{position:relative;isolation:isolate;contain:layout paint;max-width:100%;overflow-x:auto;overflow-y:hidden;margin:14px 0;line-height:normal;font-size:var(--fs-md);color:var(--ink-2)}
+.visual:first-child{margin-top:0}
+.visual:last-child{margin-bottom:0}
+.visual-in{position:relative;min-width:0}
+.visual-in > :first-child{margin-top:0 !important}
+.visual-in > :last-child{margin-bottom:0 !important}
+.visual img,.visual svg{max-width:100%}
+.visual.drawing{opacity:.75}
 .msg-body em{font-style:italic}
 .acts{margin-left:auto;display:flex;align-items:center;gap:2px}
 .acts .act{width:36px;height:36px;border-radius:10px;color:var(--ink-4)}

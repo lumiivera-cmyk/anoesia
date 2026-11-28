@@ -2,7 +2,7 @@
  * Settings, a page of its own (#/settings), from the Settings boards.
  *
  *   #/settings                 the section list on a phone, Connections on a wide screen
- *   #/settings/<section>       connections · look · agent · typing
+ *   #/settings/<section>       connections · look · agent · typing · login
  *   #/settings/profile/<id>    the profile editor (inside Connections)
  *
  * Every section keeps the same order of weight: what's in use first (raised
@@ -27,6 +27,7 @@ const SECTIONS = {
   look: { name: "Look", icon: icon.picture },
   agent: { name: "Agent", icon: icon.spark },
   typing: { name: "Typing", icon: icon.keyboard },
+  login: { name: "Login", icon: icon.lock },
 };
 const PROVIDER_NAME = { nanogpt: "nanoGPT", vertex: "Vertex AI" };
 const READABLE_LABEL = "Back to readable: reset dim and window to their defaults";
@@ -55,6 +56,8 @@ const ui = {
   json: {},
   /** The agent's notes and edits, for its section. */
   agent: null,
+  /** The logged-in devices: { enabled, devices }, once loaded. */
+  login: null,
 };
 
 /** Model lists, by provider, once loaded. */
@@ -126,6 +129,12 @@ function summary(key) {
     return { text: `lacquer · ${bg().finish} · ${photo ? photo.name : "no photo"}${belowReadable(bg()) ? " · below readable" : ""}`, bad: false };
   }
   if (key === "agent") return { text: "edits directly, all logged", bad: false };
+  if (key === "login") {
+    const l = ui.login;
+    if (!l) return { text: "devices logged in", bad: false };
+    if (!l.enabled) return { text: "no password: this phone only", bad: false };
+    return { text: `${l.devices.length} device${l.devices.length === 1 ? "" : "s"} logged in`, bad: false };
+  }
   return { text: s.enterSends === false ? "Enter adds a line" : "Enter sends", bad: false };
 }
 
@@ -143,6 +152,7 @@ export async function showSettings(section = "", sub = "") {
   render();
   if (ui.section === "profile") loadModels(profileOf(ui.profileId).provider);
   if (ui.section === "agent") loadAgentInfo();
+  loadLogin();
 }
 
 function render() {
@@ -155,7 +165,7 @@ function render() {
   const sec = ui.section === "profile" ? "connections" : ui.section;
   main.setAttribute("aria-label", sectionsMode ? "Settings" : `${SECTIONS[sec].name} settings`);
   if (!sectionsMode) {
-    $("settings-body").innerHTML = { connections: connectionsHtml, profile: editorHtml, look: lookHtml, agent: agentHtml, typing: typingHtml }[ui.section]();
+    $("settings-body").innerHTML = { connections: connectionsHtml, profile: editorHtml, look: lookHtml, agent: agentHtml, typing: typingHtml, login: loginHtml }[ui.section]();
     afterRender();
   }
 }
@@ -174,7 +184,7 @@ function redraw() {
 /** A selector that finds the same control again after a redraw. */
 function focusKey(el) {
   if (el.id) return `#${CSS.escape(el.id)}`;
-  for (const attr of ["data-assign", "data-photo", "data-finish", "data-provider", "data-effort", "data-enter", "data-setup", "data-test", "data-fix", "data-readable", "data-more"]) {
+  for (const attr of ["data-assign", "data-photo", "data-finish", "data-provider", "data-effort", "data-enter", "data-setup", "data-test", "data-fix", "data-readable", "data-more", "data-logout"]) {
     if (el.hasAttribute(attr)) return `[${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
   }
   return null;
@@ -798,6 +808,67 @@ async function loadAgentInfo() {
   if (ui.section === "agent") redraw();
 }
 
+// -------------------------------------------------------------------- login
+
+function loginHtml() {
+  const l = ui.login;
+  const head = `${sechead("Login")}`;
+  if (!l) return `${head}<p class="secsub">Loading the devices that are logged in…</p>`;
+  if (!l.enabled) {
+    return `${head}
+    <p class="secsub">There's no password, so nobody logs in: Anoesia only answers the device it runs on. On a server, set one with <code>bun run set-password</code>.</p>`;
+  }
+  const others = l.devices.filter((d) => !d.current).length;
+  const rows = l.devices
+    .map(
+      (d) => `<div class="setrow"><span class="lbl">${escapeHtml(d.name)}${d.current ? " · this device" : ""}</span>
+        <span class="hint">logged in ${dayLabel(d.createdAt)} · last used ${dayLabel(d.lastUsedAt)}</span></div>`,
+    )
+    .join("");
+  return `${head}
+    <p class="secsub">Every browser that's logged in, newest first. A private window that was closed can't get back in, but its login still shows here until you log it out.</p>
+    <div class="grouphead"><h3 class="eyebrow">logged in</h3><span class="meta">last used is noted once a day</span></div>
+    <div class="setgroup">${rows || '<div class="setrow"><span class="hint">No devices are logged in.</span></div>'}</div>
+    <div class="grouphead"><h3 class="eyebrow">log out</h3></div>
+    <div class="setgroup">
+      <div class="setrow"><span class="lbl">Other devices</span><span class="hint">${others ? `Logs out the ${others === 1 ? "other device" : `${others} other devices`}. This one stays logged in.` : "No other device is logged in."}</span>
+        <span class="ctl"><button type="button" class="btn ${others ? "raised" : "ghost"} press" data-logout="others" ${others ? "" : 'aria-disabled="true"'}>log out others</button></span></div>
+      <div class="setrow"><span class="lbl">Everywhere</span><span class="hint">Logs out every device, this one too. You'll need the password again here.</span>
+        <span class="ctl"><button type="button" class="btn ghost press" data-logout="everywhere">log out everywhere</button></span></div>
+    </div>`;
+}
+
+async function loadLogin() {
+  try {
+    ui.login = await api("GET", "/api/login/devices");
+  } catch {
+    return;
+  }
+  if (ui.section === "login") redraw();
+  else if (ui.section !== "profile") renderNav();
+}
+
+async function logOut(which, opener) {
+  const everywhere = which === "everywhere";
+  const ok = await confirmDialog({
+    title: everywhere ? "Log out everywhere?" : "Log out the other devices?",
+    body: everywhere ? "Every device has to log in again with the password, this one too." : "Every other device has to log in again with the password. This one stays logged in.",
+    confirm: everywhere ? "log out everywhere" : "log out others",
+    keep: "cancel",
+    opener,
+  });
+  if (!ok) return;
+  const done = await attempt(() => api("POST", `/api/login/${everywhere ? "everywhere" : "others"}`, {}));
+  if (!done) return;
+  if (everywhere) {
+    location.href = "login";
+    return;
+  }
+  ui.login = { enabled: true, devices: done.devices };
+  redraw();
+  renderNav();
+}
+
 // ------------------------------------------------------------------- typing
 
 function typingHtml() {
@@ -966,6 +1037,7 @@ export function wireSettings() {
     }
     // agent and typing
     if (btn.dataset.agentOpen) return openAgentTab(btn.dataset.agentOpen);
+    if (btn.dataset.logout) return logOut(btn.dataset.logout, btn);
     if (btn.dataset.enter) return setEnter(btn.dataset.enter === "sends");
   });
 

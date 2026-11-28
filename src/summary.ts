@@ -23,6 +23,7 @@
  * shows another version afterwards: the summary is then marked to check.
  */
 
+import { shortenVisuals } from "../public/js/visuals.js";
 import type { Chat, ChatMessage, Message } from "./types.ts";
 
 export const SUMMARY_NOTE = "Story so far";
@@ -91,7 +92,7 @@ Answer with only the new part of the summary.`;
 
 /** The request that folds `batch` into a summary that so far reads `summary`. */
 export function foldMessages(input: { summary: string; batch: Message[]; userName: string; cast: string[] }): ChatMessage[] {
-  const lines = input.batch.map((m) => `${m.role === "user" ? input.userName : "Narrator"}: ${m.content.trim()}`).join("\n\n");
+  const lines = input.batch.map((m) => `${m.role === "user" ? input.userName : "Narrator"}: ${shortenVisuals(m.content).trim()}`).join("\n\n");
   const who = input.cast.length ? `\n\nThe user plays ${input.userName}. The cast: ${input.cast.join(", ")}.` : `\n\nThe user plays ${input.userName}.`;
   return [
     { role: "system", content: FOLD_INSTRUCTIONS + who },
