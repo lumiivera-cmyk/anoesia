@@ -17,7 +17,7 @@
  * that changes blocks (role, switch, drag, the agent) saves typed text first.
  */
 
-import { $, api, approxTokens, attempt, cardById, escapeHtml, fmt, gem, isPhone, loadState, macroHtml, personaOf, state, timeLabel, tokChip } from "./core.js";
+import { $, api, approxTokens, attempt, cardById, escapeHtml, fmt, gem, isPhone, loadState, macroHtml, personaOf, showError, state, timeLabel, tokChip } from "./core.js";
 import { macroBarHtml, unknownNote, wireMacroBar } from "./editor.js";
 import { icon } from "./icons.js";
 import { closeOverlay, confirmDialog, openOverlay } from "./overlay.js";
@@ -362,6 +362,63 @@ function renderPreview() {
     });
   }
   $("preview-body").innerHTML = out || `<p class="meta pv-empty">Nothing is sent yet.</p>`;
+}
+
+// ------------------------------------------------------------------ copy
+
+/** Whether "copy prompt" takes the chat's messages too (remembered on this device). */
+function copyWithChat() {
+  try {
+    return localStorage.getItem("anoesia.copyChat") !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The prompt as plain text, to paste anywhere: as sent (system blocks
+ * merged, in order), or, without the chat, every block but the messages.
+ * Each part is headed with its role, so it reads like the preview.
+ */
+function promptText(withChat) {
+  if (!preview) return "";
+  const parts = withChat
+    ? preview.messages.map((m, i) => [`${m.role}${m.role === "system" && i === 0 ? " (merged blocks)" : ""}`, m.content])
+    : preview.blocks.filter((b) => !b.source.startsWith("message:") && b.source !== "start").map((b) => [`${b.role} · ${b.label.replace(/: /, " · ")}${b.depth !== undefined ? ` · depth ${b.depth}` : ""}`, b.content]);
+  return parts.map(([head, text]) => `===== ${head} =====\n\n${text.trim()}`).join("\n\n");
+}
+
+async function copyPrompt() {
+  if (!preview) await refreshPreview();
+  const text = promptText(copyWithChat());
+  if (!text) return showError("There's nothing to copy yet.");
+  let ok = await navigator.clipboard?.writeText(text).then(() => true, () => false);
+  if (!ok) {
+    // Older browsers, or no permission: the old way.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+    document.body.append(area);
+    area.select();
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+  }
+  if (!ok) return showError("Couldn't copy. Your browser blocked the clipboard.");
+  const button = $("pv-copy");
+  button.textContent = "copied";
+  clearTimeout(copyPrompt.timer);
+  copyPrompt.timer = setTimeout(() => (button.textContent = "copy prompt"), 1400);
+}
+
+function renderCopySwitch() {
+  const on = copyWithChat();
+  $("pv-copy-chat").setAttribute("aria-checked", String(on));
+  $("pv-copy-chat-l").textContent = on ? "with the chat" : "without the chat";
 }
 
 // --------------------------------------------------------------- changes
@@ -944,6 +1001,18 @@ export function wirePrompts() {
       pvAll = false;
       renderPreview();
     });
+  renderCopySwitch();
+  const toggleCopyChat = () => {
+    try {
+      localStorage.setItem("anoesia.copyChat", copyWithChat() ? "0" : "1");
+    } catch {
+      // private mode: it won't be remembered
+    }
+    renderCopySwitch();
+  };
+  $("pv-copy-chat").addEventListener("click", toggleCopyChat);
+  $("pv-copy-chat-l").addEventListener("click", toggleCopyChat);
+  $("pv-copy").addEventListener("click", copyPrompt);
   $("preview-body").addEventListener("click", (e) => {
     if (e.target.closest("[data-pv-all]")) {
       pvAll = true;
